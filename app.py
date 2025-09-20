@@ -1,5 +1,5 @@
-# SlideTutor — Improved version (fixes + more robust RAG + deep-lesson generator)
-# Save this file and run with: streamlit run slidetutor_improved.py
+# SlideTutor — Improved version with EasyOCR (no Tesseract binary required)
+# Save this file and run with: streamlit run slidetutor_improved_easyocr.py
 
 import os
 import io
@@ -37,12 +37,13 @@ try:
 except Exception:
     _HAS_PYMUPDF = False
 
-_HAS_TESSERACT = True
+# Use EasyOCR (pure-python OCR) instead of pytesseract system binary
+_HAS_EASYOCR = True
 try:
-    import pytesseract
+    import easyocr
     from PIL import Image
 except Exception:
-    _HAS_TESSERACT = False
+    _HAS_EASYOCR = False
     try:
         from PIL import Image
     except Exception:
@@ -77,7 +78,7 @@ except Exception:
 # Configuration
 # ------------------------------
 # IMPORTANT: remove hard-coded API keys in production. Leave default empty and use env or settings.
-DEFAULT_OPENROUTER_KEY = st.secrets["OPENROUTER_API_KEY"]
+DEFAULT_OPENROUTER_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
@@ -293,16 +294,41 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
         return [{"index": 0, "text": f"[pdf parse error] {e}", "images": []}]
 
 
+# EasyOCR reader factory (cached)
+@st.cache_resource
+def get_easyocr_reader(lang_list: List[str] = ['en']):
+    if not _HAS_EASYOCR:
+        return None
+    try:
+        # gpu=False ensures CPU-only; change to True if GPU available
+        reader = easyocr.Reader(lang_list, gpu=False)
+        return reader
+    except Exception as e:
+        log("easyocr init failed:", e)
+        return None
+
+
 def ocr_image_bytes_list(image_bytes_list: List[bytes]) -> List[str]:
     results = []
+    reader = get_easyocr_reader(['en'])
     for b in image_bytes_list:
         if not b:
             results.append("")
             continue
         try:
             img = Image.open(io.BytesIO(b)).convert("RGB")
-            if _HAS_TESSERACT:
-                txt = pytesseract.image_to_string(img)
+            if _HAS_EASYOCR and reader is not None:
+                arr = np.array(img)
+                try:
+                    # detail=0 returns text only; paragraph=True attempts to group lines
+                    raw = reader.readtext(arr, detail=0, paragraph=True)
+                except TypeError:
+                    # older easyocr versions may not support paragraph kw; fallback
+                    raw = reader.readtext(arr, detail=0)
+                if isinstance(raw, list):
+                    txt = "\n".join([r for r in raw if r])
+                else:
+                    txt = str(raw)
                 results.append(txt.strip())
             else:
                 results.append("")
@@ -918,7 +944,7 @@ elif nav == "Settings":
     st.write({
         "faiss_available": _HAS_FAISS,
         "pymupdf_available": _HAS_PYMUPDF,
-        "tesseract_available": _HAS_TESSERACT,
+        "easyocr_available": _HAS_EASYOCR,
         "sentence_transformers_available": _HAS_SENTENCE_TRANSFORMERS,
         "gtts_available": _HAS_GTTS
     })
@@ -931,4 +957,4 @@ elif nav == "Settings":
 
 st.markdown("<div style='position:fixed;bottom:8px;right:16px;color:#7f8c8d'>SlideTutor • Improved • Student-first</div>", unsafe_allow_html=True)
 
-# End of improved app
+# End of improved app (EasyOCR version)
