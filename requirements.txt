@@ -10,8 +10,7 @@ python-pptx
 pymupdf
 gTTS
 tqdm
-tesseract
-tesseract
+torch
 pytesseract
 # Transformers & model runtime (sentence-transformers will pull these mostly,
 # but helpful to have explicit entries)
