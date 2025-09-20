@@ -11,7 +11,8 @@ pymupdf
 gTTS
 tqdm
 tesseract
-
+tesseract
+pytesseract
 # Transformers & model runtime (sentence-transformers will pull these mostly,
 # but helpful to have explicit entries)
 transformers
