@@ -1,0 +1,20 @@
+# Core runtime
+streamlit
+sentence-transformers
+numpy
+requests
+Pillow
+pytesseract
+scikit-learn
+python-pptx
+pymupdf
+gTTS
+tqdm
+
+# Transformers & model runtime (sentence-transformers will pull these mostly,
+# but helpful to have explicit entries)
+transformers
+torch
+
+# Optional / platform-specific (may require system dependencies or conda wheels)
+faiss-cpu        # optional: use faiss-cpu on Linux; on Windows consider conda installation
