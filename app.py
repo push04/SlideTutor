@@ -40,16 +40,20 @@ except Exception:
     _HAS_PYMUPDF = False
 
 # Use EasyOCR (pure-python OCR) instead of pytesseract system binary
+# Use EasyOCR (pure-Python OCR) instead of Tesseract binary (optional)
 _HAS_EASYOCR = True
 try:
     import easyocr
     from PIL import Image
 except Exception:
     _HAS_EASYOCR = False
-    try:
-        from PIL import Image
-    except Exception:
-        raise RuntimeError("Pillow must be installed. pip install pillow")
+
+# Ensure Pillow exists (used elsewhere too)
+try:
+    from PIL import Image  # idempotent if already imported
+except Exception:
+    raise RuntimeError("Pillow must be installed. Run: pip install pillow")
+
 
 _HAS_SENTENCE_TRANSFORMERS = True
 try:
@@ -211,13 +215,7 @@ except Exception:
     _HAS_PYMUPDF = False
 
 # Streamlit cache helper (optional)
-try:
-    import streamlit as st  # type: ignore
-    _HAS_STREAMLIT = True
-except Exception:
-    st = None  # type: ignore
-    _HAS_STREAMLIT = False
-
+_HAS_STREAMLIT = True if 'st' in globals() and st is not None else False
 # Logging
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -326,11 +324,14 @@ class VectorIndex:
     def __init__(self, embeddings: Optional[np.ndarray], texts: Optional[List[str]] = None) -> None:
         texts = texts or []
         self.texts = list(texts)
+
+        # Handle empty / no embeddings
         if embeddings is None or getattr(embeddings, "size", 0) == 0:
             self.index = VectorIndexFallback(np.zeros((0, 0), dtype=np.float32), self.texts)
             self._use_faiss = False
             return
 
+        # Normal path: convert embeddings to numpy array
         emb = np.asarray(embeddings, dtype=np.float32, order="C")
         if emb.ndim == 1:
             emb = emb.reshape(1, -1)
@@ -353,6 +354,7 @@ class VectorIndex:
         else:
             self.index = VectorIndexFallback(self.embeddings, texts)
             self._use_faiss = False
+
 
     def search(self, q_emb: np.ndarray, k: int = 5) -> Tuple[np.ndarray, np.ndarray]:
         q = np.asarray(q_emb, dtype=np.float32, order="C")
@@ -639,11 +641,11 @@ def chunk_text(text: str, max_chars: int = 700) -> List[str]:
 # OpenRouter helpers
 # ------------------------------
 
-def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt-4o-mini",
-                         max_tokens: int = 512, temperature: float = 0.2) -> str:
+def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt-4o-mini", max_tokens: int = 512, temperature: float = 0.2) -> str:
     api_key = st.session_state.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
     if not api_key:
         return "[OpenRouter error] No API key configured. Set it in Settings or env var OPENROUTER_API_KEY."
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -657,9 +659,11 @@ def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+
+    text = ""
     try:
         resp = requests.post(OPENROUTER_API_URL, headers=headers, json=body, timeout=30)
-        text = resp.text
+        text = getattr(resp, "text", "")
         resp.raise_for_status()
         data = resp.json()
         choices = data.get("choices") or []
@@ -680,6 +684,7 @@ def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt
             return f"[OpenRouter error] {e} — resp_text={text}"
         except Exception:
             return f"[OpenRouter error] {e}"
+
 
 
 def extract_json_from_text(text: str) -> Optional[Any]:
@@ -1247,21 +1252,7 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 import streamlit as st
 
-# Use a fallback logger function if `log()` isn't defined in the user's module
-try:
-    log  # type: ignore
-except NameError:
-    import logging
-    _logger = logging.getLogger(__name__)
-    if not _logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-        _logger.addHandler(h)
-    _logger.setLevel(logging.INFO)
 
-    def log(*args, **kwargs):
-        msg = " ".join(str(a) for a in args)
-        _logger.info(msg)
 
 # Utility: safe access to DB cursor
 def _get_db_cursor():
