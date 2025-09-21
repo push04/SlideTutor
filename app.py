@@ -644,13 +644,11 @@ div.stSelectbox > div, div.stTextInput > div, div.stNumberInput > div{
 .slide-box{ background:#061019; padding:14px; border-radius:10px; border:1px solid rgba(255,255,255,0.03); }
 
 /* thumbnail styling inside markdown imgs */
-.thumb-img{ width:100%; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+/* refined thumbnail + control styles */
+.thumb-img{ width:100%; border-radius:8px; border:1px solid rgba(255,255,255,0.03); box-shadow: 0 6px 18px rgba(0,0,0,0.45); }
+div.stSlider > div{ padding:6px 8px !important; border-radius:8px !important; }
+div.stButton > button.small{ padding:6px 10px !important; font-size:13px !important; border-radius:8px !important; }
 
-/* responsive */
-@media (max-width: 900px){
-  .topbar{ flex-direction:column; align-items:flex-start; gap:10px; }
-  .tabs-row{ flex-wrap:wrap; }
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -895,99 +893,108 @@ elif active_tab == "Upload & Process":
             else:
                 st.markdown("<div class='card'>", unsafe_allow_html=True)
 
-                # viewer state key (unique per upload)
-                viewer_index_key = f"viewer_index_{upload_obj.get('db_id') or upload_obj.get('id')}"
+                # unique keys for this viewer instance
+                uid = upload_obj.get("db_id") or upload_obj.get("id")
+                viewer_index_key = f"viewer_index_{uid}"
+                slider_key = f"viewer_slider_{uid}"
+                prev_key = f"viewer_prev_{uid}"
+                next_key = f"viewer_next_{uid}"
+
+                # initialize viewer index
                 if viewer_index_key not in st.session_state:
                     st.session_state[viewer_index_key] = 0
 
                 slides_list = upload_obj.get("slides", []) or []
                 num_slides = len(slides_list)
 
-                # navigation row: Prev / label / Next
-                nav_c1, nav_c2, nav_c3 = st.columns([1,2,1])
+                # Navigation (Prev / label / Next)
+                nav_c1, nav_c2, nav_c3 = st.columns([1, 2, 1])
                 with nav_c1:
-                    if st.button("◀ Prev", key=f"prev_{viewer_index_key}"):
+                    if st.button("◀ Prev", key=prev_key):
                         st.session_state[viewer_index_key] = max(0, st.session_state[viewer_index_key] - 1)
                 with nav_c2:
                     st.markdown(f"### Slide {st.session_state[viewer_index_key] + 1} / {max(1, num_slides)}")
                 with nav_c3:
-                    if st.button("Next ▶", key=f"next_{viewer_index_key}"):
+                    if st.button("Next ▶", key=next_key):
                         st.session_state[viewer_index_key] = min(max(0, num_slides - 1), st.session_state[viewer_index_key] + 1)
 
                 # main area + side controls
-                main_col, side_col = st.columns([3,1])
-                cur_idx = st.session_state[viewer_index_key]
+                main_col, side_col = st.columns([3, 1])
+                cur_idx = int(st.session_state.get(viewer_index_key, 0))
+                cur_idx = max(0, min(cur_idx, max(0, num_slides - 1)))
+                st.session_state[viewer_index_key] = cur_idx  # clamp
+
                 cur_slide = slides_list[cur_idx] if num_slides > 0 else {"index": 0, "text": "", "images": []}
                 imgs = cur_slide.get("images") or []
 
-                # Show main slide image (try PIL -> data URI for consistent rendering)
+                # Main image display — prefer PIL.Image and st.image (safer than long data URIs)
                 with main_col:
                     if imgs:
                         img_bytes = imgs[0]
                         try:
                             from PIL import Image as PILImage
                             pil = PILImage.open(io.BytesIO(img_bytes)).convert("RGB")
-                            # limit width for performance
-                            max_w = 1600
+                            # downscale large images for performance
+                            max_w = 1400
                             w, h = pil.size
                             if w > max_w:
                                 pil.thumbnail((max_w, int(h * max_w / w)))
-                            buf = io.BytesIO()
-                            pil.save(buf, format="PNG")
-                            data = base64.b64encode(buf.getvalue()).decode("utf-8")
-                            st.markdown(
-                                f"<img src='data:image/png;base64,{data}' style='width:100%;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.6);'/>",
-                                unsafe_allow_html=True
-                            )
-                        except Exception:
+                            st.image(pil, use_column_width=True, caption=f"Slide {cur_slide.get('index') + 1}")
+                        except Exception as e:
+                            # fallback to raw bytes (some formats may already be PNG/JPEG)
                             try:
-                                st.image(img_bytes, use_column_width=True, caption=f"Slide {cur_slide.get('index')}")
+                                st.image(img_bytes, use_column_width=True, caption=f"Slide {cur_slide.get('index') + 1}")
                             except Exception:
+                                st.info("Could not render image for this slide — showing extracted text instead.")
                                 st.write(cur_slide.get("text", ""))
                     else:
                         st.info("No image available for this slide — showing extracted text")
                         st.write(cur_slide.get("text", ""))
 
-                # Side controls: slider + thumbnails
+                # Side controls: slider + compact thumbnails (clickable 'Open' buttons)
                 with side_col:
                     st.markdown("**Controls**")
-                    slide_select = st.slider("Go to slide", 1, max(1, num_slides), value=cur_idx + 1, key=f"slider_{viewer_index_key}")
-                    if slide_select - 1 != cur_idx:
-                        st.session_state[viewer_index_key] = slide_select - 1
+                    if num_slides > 0:
+                        # slider 1-indexed for UX, but stored 0-indexed
+                        s_val = st.slider("Go to slide", 1, num_slides, value=cur_idx + 1, key=slider_key)
+                        new_idx = max(0, s_val - 1)
+                        if new_idx != cur_idx:
+                            st.session_state[viewer_index_key] = new_idx
 
-                    st.markdown("---")
-                    st.markdown("**Thumbnails**")
+                        st.markdown("---")
+                        st.markdown("**Thumbnails**")
 
-                    # thumbnails grid (6 per row)
-                    thumbs = slides_list[:min(60, num_slides)]
-                    thumbs_per_row = 6
-                    for i in range(0, len(thumbs), thumbs_per_row):
-                        group = thumbs[i:i + thumbs_per_row]
-                        cols = st.columns(len(group))
-                        for ci, sthumb in enumerate(group):
-                            t_idx = sthumb.get("index", i + ci)
-                            t_img = (sthumb.get("images") or [None])[0]
-                            with cols[ci]:
-                                if t_img:
-                                    try:
-                                        from PIL import Image as PILImage
-                                        pil_t = PILImage.open(io.BytesIO(t_img)).convert("RGB")
-                                        pil_t.thumbnail((220, 140))
-                                        buft = io.BytesIO()
-                                        pil_t.save(buft, format="PNG")
-                                        tdata = base64.b64encode(buft.getvalue()).decode("utf-8")
-                                        st.markdown(f"<img src='data:image/png;base64,{tdata}' class='thumb-img'/>", unsafe_allow_html=True)
-                                    except Exception:
+                        # thumbnails: show up to first 36 slides (to avoid huge layouts)
+                        thumbs = slides_list[:min(36, num_slides)]
+                        thumbs_per_row = 3
+                        for i in range(0, len(thumbs), thumbs_per_row):
+                            group = thumbs[i:i + thumbs_per_row]
+                            cols = st.columns(len(group))
+                            for ci, sthumb in enumerate(group):
+                                t_idx = sthumb.get("index", i + ci)
+                                t_img = (sthumb.get("images") or [None])[0]
+                                with cols[ci]:
+                                    if t_img:
                                         try:
-                                            st.image(t_img, use_column_width=True)
+                                            from PIL import Image as PILImage
+                                            pil_t = PILImage.open(io.BytesIO(t_img)).convert("RGB")
+                                            pil_t.thumbnail((260, 160))
+                                            st.image(pil_t, use_column_width=True)
                                         except Exception:
-                                            st.markdown(f"<div class='small-muted'>Slide {t_idx+1}</div>", unsafe_allow_html=True)
-                                else:
-                                    snippet = (sthumb.get("text") or "")[:90]
-                                    st.markdown(f"<div class='small-muted' style='font-size:12px;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);'>{snippet}</div>", unsafe_allow_html=True)
+                                            try:
+                                                st.image(t_img, use_column_width=True)
+                                            except Exception:
+                                                st.markdown(f"<div class='small-muted'>Slide {t_idx+1}</div>", unsafe_allow_html=True)
+                                    else:
+                                        snippet = (sthumb.get("text") or "")[:100]
+                                        st.markdown(f"<div class='small-muted' style='font-size:12px;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);'>{snippet}</div>", unsafe_allow_html=True)
 
-                                if st.button("Open", key=f"open_thumb_{upload_obj.get('id')}_{t_idx}"):
-                                    st.session_state[viewer_index_key] = t_idx
+                                    # unique open button per thumbnail
+                                    open_key = f"open_thumb_{uid}_{t_idx}"
+                                    if st.button("Open", key=open_key):
+                                        st.session_state[viewer_index_key] = int(t_idx)
+                    else:
+                        st.info("No slides detected to display.")
 
                 st.markdown("</div>", unsafe_allow_html=True)
             # ---------------------------------------------------------
