@@ -13,6 +13,8 @@ import tempfile
 import traceback
 import sqlite3
 from typing import List, Dict, Tuple, Optional, Any
+from __future__ import annotations
+
 
 try:
     import streamlit as st
@@ -167,7 +169,6 @@ def upload_db_id(upload: Dict) -> int:
         return int(upload.get("id"))
 
 # ------------------------------
-from __future__ import annotations
 import io
 import logging
 from typing import List, Tuple, Dict, Optional
