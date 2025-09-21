@@ -582,17 +582,16 @@ if "OPENROUTER_API_KEY" not in st.session_state:
     st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 
 
-# modern CSS — professional, roomy UI, subtle animations
 st.markdown("""
 <style>
-/* Optional: load Inter from Google Fonts (uncomment if allowed in your environment) */
-/* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap'); */
+/* Optional: uncomment to load Inter from Google Fonts (if allowed)
+   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+*/
 
 /* =========================
    THEME VARIABLES & RESET
    ========================= */
 :root{
-  /* core palette */
   --bg: #071025;
   --card: #0E1B2A;
   --muted: #9AA6B2;
@@ -601,68 +600,72 @@ st.markdown("""
   --accent-2: #4D7CFE;
   --glass: rgba(255,255,255,0.03);
 
-  /* spacing & sizing */
-  --gap-sm: 8px;
-  --gap-md: 16px;
-  --gap-lg: 24px;
+  --gap-xs: 8px;
+  --gap-sm: 12px;
+  --gap-md: 20px;
+  --gap-lg: 32px;
   --radius: 12px;
 
-  /* typography */
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  --base-font-size: 14px;
-  --heading-scale: 1.15;
+  --base-font: 14px;
 }
 
-/* Respect user preference for reduced motion */
+/* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
-/* Optional: support for light mode fallback */
+/* Light mode fallback */
 @media (prefers-color-scheme: light) {
-  :root {
-    --bg: #F7FAFF;
+  :root{
+    --bg: #F6F8FB;
     --card: #FFFFFF;
     --text: #0B1630;
-    --muted: #556575;
+    --muted: #60708A;
     --glass: rgba(11,22,48,0.03);
   }
 }
 
-/* Scope everything to reduce clashes.
-   If you prefer global styling, replace `.custom-theme` with `:root` or `.stApp`. */
-.custom-theme,
-.custom-theme * {
+/* Scope to an optional wrapper to avoid global collisions.
+   Wrap your app content in: <div class="app-theme"> ... </div>
+   Or remove the ".app-theme" prefix to apply globally. */
+.app-theme, .app-theme * {
   box-sizing: border-box;
   font-family: var(--font-sans);
   color: var(--text);
 }
 
-/* Base layout (applies to the stApp area) */
-.custom-theme .stApp, .custom-theme html, .custom-theme body {
+/* Page background */
+.app-theme body, .app-theme .stApp {
   background: var(--bg);
-  padding: 0;
   margin: 0;
-  font-size: var(--base-font-size);
+  padding: 0;
+  font-size: var(--base-font);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Links */
-.custom-theme a { color: var(--accent-2); text-decoration: none; }
-.custom-theme a:hover, .custom-theme a:focus { text-decoration: underline; }
+/* Utilities */
+.app-theme .row { display:flex; gap:var(--gap-md); align-items:center; }
+.app-theme .col { display:block; }
+.app-theme .muted { color:var(--muted); font-size:0.92rem; }
+.app-theme .visually-hidden { position:absolute !important; height:1px; width:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; border:0; padding:0; margin:-1px; }
 
-/* Topbar / brand */
-.custom-theme .topbar {
+/* Top bar / brand */
+.app-theme .topbar {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:var(--gap-md);
-  padding:18px 20px;
+  gap:var(--gap-sm);
+  padding:16px 20px;
 }
-.custom-theme .logo {
-  width:48px;
-  height:48px;
+.app-theme .brand {
+  display:flex;
+  gap:12px;
+  align-items:center;
+}
+.app-theme .logo {
+  width:48px; height:48px;
   border-radius:10px;
   background: linear-gradient(135deg,var(--accent-2),var(--accent));
   display:flex;
@@ -670,146 +673,134 @@ st.markdown("""
   justify-content:center;
   font-weight:700;
   color:white;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.55);
   flex-shrink:0;
 }
-.custom-theme .title {
-  font-size: calc(var(--base-font-size) * 1.4);
-  font-weight: 700;
+.app-theme .brand .title {
+  font-size:1.25rem;
+  font-weight:700;
   margin:0;
   line-height:1;
 }
-.custom-theme .subtitle {
-  color: var(--muted);
-  font-size: calc(var(--base-font-size) * 0.9);
-  margin-top:4px;
-}
+.app-theme .brand .subtitle { font-size:0.88rem; color:var(--muted); margin-top:2px; }
 
-/* Tabs row */
-.custom-theme .tabs-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-.custom-theme .tab-btn {
-  padding:10px 14px;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid transparent;
-  transition: all .14s ease;
+/* Tabs / nav */
+.app-theme .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.app-theme .tab {
+  padding:8px 12px;
+  border-radius:9px;
+  background:transparent;
+  color:var(--muted);
+  border:1px solid transparent;
   font-weight:600;
-  cursor: pointer;
-  outline: none;
+  cursor:pointer;
+  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
 }
-.custom-theme .tab-btn:hover { transform: translateY(-2px); }
-.custom-theme .tab-btn:focus { box-shadow: 0 0 0 3px rgba(77,124,254,0.12); }
-.custom-theme .tab-btn.active {
-  background: var(--card);
-  color: var(--text);
-  border-color: rgba(255,255,255,0.04);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+.app-theme .tab:hover { transform: translateY(-2px); }
+.app-theme .tab.active {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  color:var(--text);
+  border-color: rgba(255,255,255,0.03);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.45);
 }
 
 /* Cards & hero */
-.custom-theme .card {
+.app-theme .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
-  padding: 18px;
+  padding:18px;
   border-radius: var(--radius);
   border: 1px solid var(--glass);
   box-shadow: 0 8px 28px rgba(2,6,12,0.5);
-  animation: themeFadeIn .28s ease;
+  transition: transform .15s ease, box-shadow .15s ease;
 }
-.custom-theme .hero { padding:22px; border-radius: var(--radius); margin-bottom: 18px; }
+.app-theme .card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px rgba(2,6,12,0.55); }
+.app-theme .hero { padding:22px; border-radius: var(--radius); }
 
-/* Accessible focus ring for interactive elements */
-.custom-theme button:focus, .custom-theme a:focus, .custom-theme input:focus, .custom-theme select:focus {
-  outline: none;
-  box-shadow: 0 0 0 4px rgba(42,183,169,0.10), 0 4px 18px rgba(2,6,12,0.35);
-  border-radius: 10px;
+/* Buttons — consistent primary style */
+.app-theme .btn {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px 16px;
+  border-radius: 12px;
+  font-weight:700;
+  cursor:pointer;
+  border: none;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  color: #fff;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
 }
-
-/* Subtle fade-in */
-@keyframes themeFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* Small muted text */
-.custom-theme .small-muted { color: var(--muted); font-size: 13px; line-height: 1.35; }
-
-/* Streamlit button override — consistent primary style.
-   We intentionally keep specificity moderate so Streamlit internals still work. */
-.custom-theme div.stButton > button,
-.custom-theme button[kind="primary"] {
-  background: linear-gradient(90deg, var(--accent-2), var(--accent)) !important;
-  color: #ffffff !important;
-  font-weight: 700;
-  border: none !important;
-  padding: 10px 16px !important;
-  border-radius: 12px !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-  transition: transform .14s ease, box-shadow .14s ease, opacity .14s ease;
-  cursor: pointer;
-}
-.custom-theme div.stButton > button:hover { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(0,0,0,0.55); }
-.custom-theme div.stButton > button:active { transform: translateY(-1px); }
-
-/* Inputs & selects (airier, consistent padding). Keep selectors broad to cover different Streamlit versions */
-.custom-theme input[type="text"],
-.custom-theme input[type="number"],
-.custom-theme textarea,
-.custom-theme select,
-.custom-theme .stTextInput>div, 
-.custom-theme .stNumberInput>div,
-.custom-theme .stSelectbox>div {
-  border-radius: 10px !important;
-  background: rgba(255,255,255,0.01) !important;
-  border: 1px solid rgba(255,255,255,0.02) !important;
-  padding: 8px !important;
+.app-theme .btn:active { transform: translateY(-1px); }
+.app-theme .btn.secondary {
+  background: transparent;
   color: var(--text);
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: none;
 }
 
-/* Slide/thumbnail viewer */
-.custom-theme .slide-box {
-  background: #061019;
-  padding:14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.03);
-}
-
-/* Thumbnails */
-.custom-theme .thumb-img {
+/* Inputs & selects — roomy and consistent */
+.app-theme input[type="text"],
+.app-theme input[type="number"],
+.app-theme textarea,
+.app-theme select {
   width:100%;
-  border-radius:8px;
-  border:1px solid rgba(255,255,255,0.03);
-  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
-  display:block;
+  padding:10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.01);
+  border: 1px solid rgba(255,255,255,0.02);
+  color: var(--text);
+  font-size: 0.95rem;
+  transition: box-shadow .12s ease, border-color .12s ease;
+}
+.app-theme input:focus, .app-theme textarea:focus, .app-theme select:focus {
+  outline: none;
+  border-color: rgba(77,124,254,0.16);
+  box-shadow: 0 6px 18px rgba(2,6,12,0.35), 0 0 0 4px rgba(77,124,254,0.06);
 }
 
-/* Slider & button utility classes */
-.custom-theme .small-btn { padding:6px 10px !important; font-size:13px !important; border-radius:8px !important; }
+/* Streamlit button overrides (keeps specificity low) */
+.app-theme div.stButton > button {
+  all: unset;
+  box-sizing: border-box;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  padding:10px 16px;
+  border-radius:12px;
+  font-weight:700;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  color:#fff;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.45);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.app-theme div.stButton > button:hover { transform: translateY(-3px); }
+
+/* Small helpers */
+.app-theme .small { font-size:0.9rem; color:var(--muted); }
+.app-theme .meta { font-size:0.85rem; color:var(--muted); }
 
 /* Responsive typography */
 @media (min-width: 900px) {
-  .custom-theme .title { font-size: calc(var(--base-font-size) * 1.6); }
+  .app-theme .brand .title { font-size:1.4rem; }
 }
 @media (max-width: 720px) {
-  .custom-theme .topbar { padding: 12px; gap:10px; }
-  .custom-theme .title { font-size: calc(var(--base-font-size) * 1.25); }
-  .custom-theme .tab-btn { padding: 8px 10px; }
+  .app-theme .topbar { padding:12px; gap:10px; }
+  .app-theme .brand .title { font-size:1.05rem; }
+  .app-theme .card { padding:14px; }
 }
 
-/* Utility helpers (spacing, visually-hidden for accessibility) */
-.custom-theme .mt-sm { margin-top: var(--gap-sm); }
-.custom-theme .mt-md { margin-top: var(--gap-md); }
-.custom-theme .visually-hidden {
-  position: absolute !important;
-  height: 1px; width: 1px;
-  overflow: hidden; clip: rect(1px, 1px, 1px, 1px);
-  white-space: nowrap; border: 0; padding: 0; margin: -1px;
+/* Small fade-in used on cards only (subtle) */
+@keyframes fadeUp {
+  from { opacity:0; transform: translateY(6px); }
+  to { opacity:1; transform: translateY(0); }
 }
+.app-theme .card { animation: fadeUp .24s ease both; }
+
 </style>
-
-<!-- If you want styles applied globally remove the outer ".custom-theme" wrapper in the CSS above,
-     and optionally wrap your app content in: <div class="custom-theme"> ... </div> -->
 """, unsafe_allow_html=True)
+
 
 
 
