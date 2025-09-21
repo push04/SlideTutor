@@ -1,5 +1,6 @@
 # SlideTutor — Improved version with EasyOCR (no Tesseract binary required)
-# Save this file and run with: streamlit run slidetutor_improved_easyocr.py
+# UI/UX refreshed: single-page (no sidebar), top tabs, modern CSS, subtle animations
+# Save this file and run with: streamlit run slidetutor_improved_easyocr_ui.py
 
 import os
 import io
@@ -77,7 +78,6 @@ except Exception:
 # ------------------------------
 # Configuration
 # ------------------------------
-# IMPORTANT: remove hard-coded API keys in production. Leave default empty and use env or settings.
 DEFAULT_OPENROUTER_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions")
@@ -154,6 +154,7 @@ def init_db(path: str = DB_PATH):
     return conn
 
 _db_conn = init_db()
+
 def upload_db_id(upload: Dict) -> int:
     """
     Return the DB uploads.id for this in-memory upload object.
@@ -164,7 +165,6 @@ def upload_db_id(upload: Dict) -> int:
         return int(upload.get("db_id") or upload.get("id"))
     except Exception:
         return int(upload.get("id"))
-
 
 # ------------------------------
 # Embedding Index (improvements)
@@ -180,7 +180,6 @@ class VectorIndexFallback:
             self._norms = norms
 
     def search(self, q_emb: np.ndarray, k: int = 5) -> Tuple[np.ndarray, np.ndarray]:
-        # Always return shapes (1, k) for compatibility
         k = max(1, int(k))
         if self.embeddings.size == 0:
             return np.full((1, k), 1e9), np.full((1, k), -1, dtype=int)
@@ -244,9 +243,8 @@ def embed_texts(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
     return arr.astype(np.float32)
 
 # ------------------------------
-# Parsers (unchanged logic but kept defensive)
+# Parsers
 # ------------------------------
-# [extract_from_pptx_bytes, extract_from_pdf_bytes, ocr_image_bytes_list, chunk_text remain similar]
 
 def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
     slides = []
@@ -278,6 +276,7 @@ def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
         log("pptx parse error:", e)
         return [{"index": 0, "text": f"[pptx parse error] {e}", "images": []}]
 
+
 def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
     slides = []
     if not _HAS_PYMUPDF:
@@ -302,12 +301,10 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
             # If page has no selectable text and no embedded images, render page to an image
             if (not text) and (not images):
                 try:
-                    # render at a decent DPI for OCR
-                    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # ~150-200 DPI
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
                     try:
                         img_bytes = pix.tobytes(output="png")
                     except TypeError:
-                        # older pymupdf versions use different signature
                         img_bytes = pix.tobytes()
                     images.append(img_bytes)
                 except Exception as e:
@@ -327,7 +324,6 @@ def get_easyocr_reader(lang_list: List[str] = ['en']):
     if not _HAS_EASYOCR:
         return None
     try:
-        # gpu=False ensures CPU-only; change to True if GPU available
         reader = easyocr.Reader(lang_list, gpu=False)
         return reader
     except Exception as e:
@@ -347,10 +343,8 @@ def ocr_image_bytes_list(image_bytes_list: List[bytes]) -> List[str]:
             if _HAS_EASYOCR and reader is not None:
                 arr = np.array(img)
                 try:
-                    # detail=0 returns text only; paragraph=True attempts to group lines
                     raw = reader.readtext(arr, detail=0, paragraph=True)
                 except TypeError:
-                    # older easyocr versions may not support paragraph kw; fallback
                     raw = reader.readtext(arr, detail=0)
                 if isinstance(raw, list):
                     txt = "\n".join([r for r in raw if r])
@@ -402,7 +396,7 @@ def chunk_text(text: str, max_chars: int = 700) -> List[str]:
     return final_parts
 
 # ------------------------------
-# OpenRouter helpers (more robust)
+# OpenRouter helpers
 # ------------------------------
 
 def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt-4o-mini",
@@ -428,21 +422,16 @@ def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt
         text = resp.text
         resp.raise_for_status()
         data = resp.json()
-        # prefer common response shapes
         choices = data.get("choices") or []
         if choices:
             first = choices[0]
-            # many endpoints use message->content
             msg = first.get("message") or {}
             content = msg.get("content") if isinstance(msg, dict) else None
             if not content:
-                # some endpoints return 'text'
                 content = first.get("text")
             if not content:
-                # last resort: try data['output'][0]['content'] (some wrappers)
                 content = json.dumps(first)
             return content
-        # fallback: maybe top-level 'result' or 'output'
         if "result" in data:
             return str(data["result"])
         return "[openrouter] empty response"
@@ -454,14 +443,11 @@ def call_openrouter_chat(system_prompt: str, user_prompt: str, model: str = "gpt
 
 
 def extract_json_from_text(text: str) -> Optional[Any]:
-    # Try to extract first JSON array/object from a string, tolerant to code fences and markdown
     if not text:
         return None
-    # remove common markdown code fences
     cleaned = text.strip()
     for fence in ['```json', '```']:
         cleaned = cleaned.replace(fence, '')
-    # find first { or [ and attempt json.loads of progressive substring
     import re
     m = re.search(r'([\{\[])', cleaned)
     if not m:
@@ -474,7 +460,6 @@ def extract_json_from_text(text: str) -> Optional[Any]:
             return parsed
         except Exception:
             continue
-    # last resort, attempt to find balanced JSON via regex for array
     arr_match = re.search(r'\[.*\]', cleaned, flags=re.S)
     if arr_match:
         try:
@@ -490,7 +475,7 @@ def extract_json_from_text(text: str) -> Optional[Any]:
     return None
 
 # ------------------------------
-# Generators (improved parsing and deeper lesson option)
+# Generators
 # ------------------------------
 
 def generate_multilevel_lesson(slide_text: str, related_texts: str = "") -> str:
@@ -504,7 +489,6 @@ def generate_multilevel_lesson(slide_text: str, related_texts: str = "") -> str:
 
 
 def generate_deep_lesson(slide_text: str, related_texts: str = "") -> str:
-    # Longer detailed lesson, step-by-step from basics to advanced with progressive worked examples, derivations, and common misconceptions
     system = (
         "You are an expert university instructor teaching the topic in depth to a BTech 2nd-year mechanical engineering student. "
         "Start from first principles in very simple language, then progressively increase difficulty. For each level include: (1) concept explanation, "
@@ -525,7 +509,6 @@ def generate_mcq_set_from_text(text: str, qcount: int = 5) -> List[Dict]:
     parsed = extract_json_from_text(resp)
     if isinstance(parsed, list):
         return parsed
-    # fallback: simple heuristic generation (very small)
     return [{"question": "Summarize the main idea in one sentence.", "options": ["A", "B", "C", "D"], "answer_index": 0}]
 
 
@@ -539,7 +522,7 @@ def generate_flashcards_from_text(text: str, n: int = 10) -> List[Dict]:
     return []
 
 # ------------------------------
-# SM-2 (unchanged)
+# SM-2
 # ------------------------------
 
 def sm2_update_card(easiness: float, interval: int, repetitions: int, quality: int) -> Tuple[float, int, int, int]:
@@ -591,40 +574,79 @@ def text_to_speech_download(text: str, lang: str = "en") -> Tuple[str, bytes]:
     return "lesson_audio.mp3", b
 
 # ------------------------------
-# Streamlit UI (major UX improvements)
+# Streamlit UI — single page with top tabs and improved CSS
 # ------------------------------
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 if "OPENROUTER_API_KEY" not in st.session_state:
     st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 
+# modern CSS + animations
 st.markdown("""
-    <style>
-    html, body, .stApp { background-color: #0b0f13; color: #e6edf3; }
-    .card { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:16px; border-radius:12px; }
-    .small-muted { color:#9aa6b2; font-size:13px; }
-    .slide-box { background:#071019; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
-    .title { font-size:28px; font-weight:700; color:#fff; }
-    .subtitle { color:#9aa6b2; margin-bottom:12px; }
-    .mono { font-family: monospace; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+:root{
+  --bg:#071022;
+  --card: rgba(255,255,255,0.03);
+  --muted:#9aa6b2;
+  --accent1: linear-gradient(135deg,#7b61ff,#3ad29f);
+}
+html, body, .stApp { background: linear-gradient(180deg, rgba(8,12,20,1), rgba(3,6,12,1)); color: #dbe9f7; }
+/* Animated decorative blobs */
+.blob{ position:absolute; width:360px; height:360px; filter: blur(70px); opacity:0.18; z-index:0; transform:translate3d(0,0,0); }
+.blob.one{ background: radial-gradient(circle at 20% 30%, #7b61ff, transparent 40%); top:-60px; left:-60px; animation: floaty 9s ease-in-out infinite; }
+.blob.two{ background: radial-gradient(circle at 80% 70%, #19d3a7, transparent 40%); right:-80px; bottom:-80px; animation: floaty 12s ease-in-out infinite reverse; }
+@keyframes floaty{ 0%{transform:translateY(0) rotate(0deg);} 50%{transform:translateY(16px) rotate(6deg);} 100%{transform:translateY(0) rotate(0deg);} }
 
-col1, col2 = st.columns([8, 2])
-with col1:
-    st.markdown(f"<div class='title'>{APP_TITLE}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='subtitle'>{APP_SUBTITLE}</div>", unsafe_allow_html=True)
-with col2:
-    st.markdown("<div style='text-align:right'><small class='small-muted'>Student edition • Improved</small></div>", unsafe_allow_html=True)
+/* Top nav as tabs */
+.topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 28px; position:relative; z-index:2; }
+.brand{ display:flex; align-items:center; gap:14px; }
+.logo{ width:48px; height:48px; border-radius:10px; background: linear-gradient(135deg,#7b61ff,#3ad29f); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+.title{ font-size:20px; font-weight:700; }
+.subtitle{ color:var(--muted); font-size:12px; margin-top:2px; }
 
-st.sidebar.title("SlideTutor")
-nav = st.sidebar.radio("Navigation", ["Upload & Process", "Lessons", "Chat Q&A", "Quizzes", "Flashcards", "Export", "Progress", "Settings"])
+.tabs-row{ display:flex; gap:8px; align-items:center; }
+.tab-btn{ padding:10px 14px; border-radius:10px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .18s ease; font-weight:600; }
+.tab-btn.active{ background:var(--card); color:#eaf6ff; border-color: rgba(255,255,255,0.04); box-shadow: 0 6px 18px rgba(6,8,12,0.7); }
+.tab-btn:hover{ transform:translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
 
+/* card style */
+.card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:18px; border-radius:14px; border:1px solid rgba(255,255,255,0.03); }
+.hero{ padding:28px; border-radius:14px; margin-bottom:16px; }
+.small-muted{ color:var(--muted); font-size:13px; }
+.slide-box{ background:#071019; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+.mono{ font-family: monospace; }
+
+/* style streamlit buttons a bit */
+div.stButton > button, button[kind="primary"]{ background: linear-gradient(90deg,#7b61ff,#3ad29f) !important; color: #021018 !important; font-weight:700; border:none !important; padding:10px 16px !important; border-radius:10px !important; }
+
+/* small responsive tweaks */
+@media (max-width: 900px){ .topbar{ flex-direction:column; align-items:flex-start; gap:8px; } .tabs-row{ flex-wrap:wrap; } }
+</style>
+""", unsafe_allow_html=True)
+
+# Decorative blobs (absolute positioned)
+st.markdown("<div class='blob one'></div><div class='blob two'></div>", unsafe_allow_html=True)
+
+# Top bar (brand + tabs rendered using streamlit components)
+with st.container():
+    cols = st.columns([0.4, 3, 2])
+    with cols[0]:
+        st.markdown("<div class='logo'>ST</div>", unsafe_allow_html=True)
+    with cols[1]:
+        st.markdown("<div class='title'>%s</div><div class='subtitle'>%s</div>" % (APP_TITLE, APP_SUBTITLE), unsafe_allow_html=True)
+    with cols[2]:
+        st.markdown("<div style='text-align:right'><small class='small-muted'>Student edition • Improved</small></div>", unsafe_allow_html=True)
+
+# top tabs — all on homepage, no sidebar
+TAB_NAMES = ["Home", "Upload & Process", "Lessons", "Chat Q&A", "Quizzes", "Flashcards", "Export", "Progress", "Settings"]
+(tab_home, tab_upload, tab_lessons, tab_chat, tab_quiz, tab_flash, tab_export, tab_progress, tab_settings) = st.tabs(TAB_NAMES)
+
+# Shared session uploads container
 if "uploads" not in st.session_state:
     st.session_state["uploads"] = []
 
+# helper to build index (unchanged)
 def build_index_for_upload(upload: Dict):
-    # builds embeddings and index and retains mapping
     model = load_sentence_transformer()
     chunks = upload.get("chunks", [])
     if not chunks:
@@ -636,8 +658,33 @@ def build_index_for_upload(upload: Dict):
     upload["index"] = VectorIndex(emb, chunks)
     return upload
 
+# ------------------------------
+# Home tab
+# ------------------------------
+with tab_home:
+    st.markdown("<div class='card hero'>", unsafe_allow_html=True)
+    cols = st.columns([3, 2])
+    with cols[0]:
+        st.markdown("<h2 style='margin:0;padding:0'>Welcome to <span style='color:#a79bff'>SlideTutor</span></h2>", unsafe_allow_html=True)
+        st.markdown("<p class='small-muted'>Upload any PPTX or PDF and generate lessons, quizzes, flashcards, and more — all on this page.</p>", unsafe_allow_html=True)
+        st.markdown("<ul class='small-muted'><li>Scanned PDFs supported (EasyOCR)</li><li>Auto-generated quizzes & flashcards</li><li>Spaced repetition (SM-2)</li></ul>", unsafe_allow_html=True)
+        st.write("")
+        st.markdown("<div class='small-muted'>Quick actions</div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.button("Upload & Process")
+        with c2:
+            st.button("Generate Lesson")
+        with c3:
+            st.button("Practice Flashcards")
+    with cols[1]:
+        st.markdown("<div class='card' style='padding:12px;text-align:center'>\n<h3 style='margin-top:2px'>Usage Tip</h3>\n<p class='small-muted' style='font-size:13px'>Start by uploading your file in the 'Upload & Process' tab. Then explore Lessons / Quizzes / Flashcards generated automatically.</p>\n</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------
 # Upload & Process
-if nav == "Upload & Process":
+# ------------------------------
+with tab_upload:
     st.header("Upload PPTX / PDF (Student Upload)")
     uploaded_file = st.file_uploader("Choose a PPTX or PDF file", type=["pptx", "pdf"], accept_multiple_files=False)
     if uploaded_file is not None:
@@ -701,8 +748,10 @@ if nav == "Upload & Process":
             st.error(f"Error during processing: {e}")
             st.exception(traceback.format_exc())
 
+# ------------------------------
 # Lessons
-elif nav == "Lessons":
+# ------------------------------
+with tab_lessons:
     st.header("Generate Multi-level Lessons")
     if not st.session_state["uploads"]:
         st.info("No uploads yet. Go to Upload & Process.")
@@ -722,7 +771,6 @@ elif nav == "Lessons":
             st.write(slide_text if len(slide_text) < 4000 else slide_text[:4000] + "...")
             st.markdown("</div>", unsafe_allow_html=True)
 
-            # options
             deep = st.checkbox("Produce a deeply detailed lesson (longer, step-by-step)", value=False)
             auto_create = st.checkbox("Also auto-create quiz + flashcards and save to DB", value=True)
 
@@ -752,24 +800,22 @@ elif nav == "Lessons":
                 st.markdown(lesson)
 
                 if auto_create:
-                    # attempt to extract MCQs and flashcards from lesson
                     st.info("Attempting to auto-generate MCQs and flashcards from lesson and saving to DB.")
                     mcqs = generate_mcq_set_from_text(lesson, qcount=8)
                     fcards = generate_flashcards_from_text(lesson, n=12)
-                    # save
                     cur = _db_conn.cursor()
                     try:
+                        db_uid = upload_db_id(upload)
                         for q in mcqs:
-                            db_uid = upload_db_id(upload)
-                        cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                    (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
+                            cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                                        (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
                         inserted = 0
                         for card in fcards:
                             qtext = card.get("q") or card.get("question") or ""
                             atext = card.get("a") or card.get("answer") or ""
                             if qtext and atext:
                                 cur.execute("INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                    (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())))
+                                            (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())))
                                 inserted += 1
                         _db_conn.commit()
                         st.success(f"Saved {len(mcqs)} MCQs and {inserted} flashcards to DB (if any).")
@@ -784,8 +830,10 @@ elif nav == "Lessons":
                         except Exception as e:
                             st.error(f"TTS failed: {e}")
 
+# ------------------------------
 # Chat Q&A
-elif nav == "Chat Q&A":
+# ------------------------------
+with tab_chat:
     st.header("Ask questions about your upload (Retrieval + LLM)")
     if not st.session_state["uploads"]:
         st.info("No uploads yet. Upload files first.")
@@ -820,8 +868,10 @@ elif nav == "Chat Q&A":
                     for j, s in enumerate(top_ctx[:TOP_K]):
                         st.code(s[:800] + ("..." if len(s) > 800 else ""))
 
-# Quizzes (unchanged but improved save)
-elif nav == "Quizzes":
+# ------------------------------
+# Quizzes
+# ------------------------------
+with tab_quiz:
     st.header("Auto-generated Quizzes")
     if not st.session_state["uploads"]:
         st.info("No uploads yet.")
@@ -862,8 +912,10 @@ elif nav == "Quizzes":
                 except Exception as e:
                     st.warning(f"Could not save quiz to DB: {e}")
 
-# Flashcards (unchanged UI, but uses better generator)
-elif nav == "Flashcards":
+# ------------------------------
+# Flashcards
+# ------------------------------
+with tab_flash:
     st.header("Flashcards & Spaced Repetition")
     if not st.session_state["uploads"]:
         st.info("No uploads yet.")
@@ -885,126 +937,29 @@ elif nav == "Flashcards":
                     cur = _db_conn.cursor()
                     inserted = 0
                     db_uid = upload_db_id(upload)
-                    for card in cards:
-                        qtext = card.get("q") or card.get("question") or ""
-                        atext = card.get("a") or card.get("answer") or ""
-                        if qtext and atext:
-                            cur.execute("INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                        (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())))
-                            inserted += 1
-
-                    _db_conn.commit()
-                    st.success(f"Inserted {inserted} flashcards into your deck.")
-            st.markdown("---")
-            st.subheader("Review due flashcards")
-            now = int(time.time())
-            cur = _db_conn.cursor()
-            db_uid = upload_db_id(upload)
-            cur.execute("SELECT id, question, answer, easiness, interval, repetitions FROM flashcards WHERE upload_id = ? AND (next_review IS NULL OR next_review <= ?) ORDER BY next_review ASC",
-                        (db_uid, now))
-
-            due_cards = cur.fetchall()
-            if not due_cards:
-                st.info("No cards due for this upload. Generate some or wait for scheduled review.")
-            else:
-                for row in due_cards:
-                    fid, qtext, atext, eas, inter, reps = row
-                    st.markdown(f"**Q:** {qtext}")
-                    if st.button(f"Show Answer", key=f"show_{fid}"):
-                        st.markdown(f"**A:** {atext}")
-                        rating = st.slider("How well did you recall? (0-5)", 0, 5, 3, key=f"rating_{fid}")
-                        if st.button("Submit Rating", key=f"submit_rating_{fid}"):
-                            eas_new, interval_new, reps_new, next_review = sm2_update_card(eas, inter, reps, rating)
-                            cur.execute("UPDATE flashcards SET easiness = ?, interval = ?, repetitions = ?, next_review = ? WHERE id = ?",
-                                        (eas_new, interval_new, reps_new, next_review, fid))
-                            _db_conn.commit()
-                            st.success("Card updated; next review scheduled.")
-
-# Export
-elif nav == "Export":
-    st.header("Export — Anki / Audio / Raw")
-    if not st.session_state["uploads"]:
-        st.info("No uploads available.")
-    else:
-        options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
-        sel_id = st.selectbox("Select upload to export from", options=list(options.keys()), format_func=lambda k: options[k])
-        upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
-        if upload:
-            if st.button("Export flashcards to Anki (TSV)"):
-                try:
-                    fname, data = anki_export_csv_for_upload(upload_db_id(upload), _db_conn)
-                    st.download_button("Download Anki TSV", data, file_name=fname, mime="text/tab-separated-values")
-
-                except Exception as e:
-                    st.error(f"Export failed: {e}")
-            if _HAS_GTTS:
-                if st.button("Export all generated lessons as MP3 (single)"):
-                    lesson_text = ""
-                    for s in upload.get("slides", [])[:10]:
-                        lesson_text += f"Slide {s['index']}. {s.get('text','')}\n\n"
                     try:
-                        fname, data = text_to_speech_download(lesson_text)
-                        st.download_button("Download lessons MP3", data, file_name=fname, mime="audio/mpeg")
+                        for card in cards:
+                            qtext = card.get("q") or card.get("question") or ""
+                            atext = card.get("a") or card.get("answer") or ""
+                            if qtext and atext:
+                                cur.execute(
+                                    "INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                    (db_uid, qtext, atext, 2.5, 1, 0, int(time.time()))
+                                )
+                                inserted += 1
+                        _db_conn.commit()
+
+                        if inserted:
+                            st.success(f"Inserted {inserted} flashcards into your deck.")
+                            # preview first few inserted cards
+                            st.markdown("**Preview (first 5):**")
+                            for i, card in enumerate(cards[:5]):
+                                qtext = card.get("q") or card.get("question") or ""
+                                atext = card.get("a") or card.get("answer") or ""
+                                st.markdown(f"**{i+1}.** {qtext}")
+                                st.markdown(f"<div class='small-muted'>Answer: {atext}</div>", unsafe_allow_html=True)
+                        else:
+                            st.info("No valid Q/A pairs were found in the generated output.")
                     except Exception as e:
-                        st.error(f"TTS failed: {e}")
-            if st.button("Download extracted slides (JSON)"):
-                ark = json.dumps(upload.get("slides", []), ensure_ascii=False, indent=2).encode("utf-8")
-                st.download_button("Download JSON", ark, file_name=f"{upload['filename']}_extracted.json", mime="application/json")
-
-# Progress
-elif nav == "Progress":
-    st.header("Progress & Analytics")
-    st.markdown("Overview of uploads and study artifacts")
-    cur = _db_conn.cursor()
-    cur.execute("SELECT id, filename, uploaded_at, meta FROM uploads ORDER BY uploaded_at DESC")
-    rows = cur.fetchall()
-    if not rows:
-        st.info("No uploads logged in DB yet.")
-    else:
-        for r in rows:
-            uid, fname, uploaded_at, meta = r
-            st.markdown(f"**{fname}** — uploaded at {time.ctime(uploaded_at)}")
-            meta_obj = safe_json_loads(meta) or {}
-            st.write(meta_obj)
-            c2 = _db_conn.cursor()
-            c2.execute("SELECT COUNT(*) FROM flashcards WHERE upload_id = ?", (uid,))
-            fc_count = c2.fetchone()[0]
-            c2.execute("SELECT COUNT(*) FROM quizzes WHERE upload_id = ?", (uid,))
-            q_count = c2.fetchone()[0]
-            st.write(f"Flashcards: {fc_count} • Quizzes: {q_count}")
-            st.markdown("---")
-    c = _db_conn.cursor()
-    c.execute("SELECT COUNT(*) FROM flashcards")
-    total_fc = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM quizzes")
-    total_q = c.fetchone()[0]
-    st.write(f"Total flashcards in DB: {total_fc}")
-    st.write(f"Total quizzes in DB: {total_q}")
-
-# Settings
-elif nav == "Settings":
-    st.header("Settings & Diagnostics")
-    if "OPENROUTER_API_KEY" not in st.session_state:
-        st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
-    key = st.text_input("OpenRouter API key (leave blank to use env/default)", value=st.session_state.get("OPENROUTER_API_KEY",""), type="password")
-    if st.button("Save API Key (session only)"):
-        st.session_state["OPENROUTER_API_KEY"] = key.strip() or st.session_state.get("OPENROUTER_API_KEY", "")
-        st.success("API key set for this session.")
-    st.markdown("Diagnostics:")
-    st.write({
-        "faiss_available": _HAS_FAISS,
-        "pymupdf_available": _HAS_PYMUPDF,
-        "easyocr_available": _HAS_EASYOCR,
-        "sentence_transformers_available": _HAS_SENTENCE_TRANSFORMERS,
-        "gtts_available": _HAS_GTTS
-    })
-    if st.button("Test OpenRouter (small ping)"):
-        test = call_openrouter_chat("You are a test bot.", "Say 'pong' in a plain short reply.", max_tokens=20)
-        st.code(test)
-    if st.button("Clear all uploads (session state only)"):
-        st.session_state["uploads"] = []
-        st.success("Cleared session uploads.")
-
-st.markdown("<div style='position:fixed;bottom:8px;right:16px;color:#7f8c8d'>SlideTutor • Improved • Student-first</div>", unsafe_allow_html=True)
-
-# End of improved app (EasyOCR version)
+                        st.error(f"Failed to save flashcards: {e}")
+                        log("flashcard save error:", e)
