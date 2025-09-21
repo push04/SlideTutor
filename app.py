@@ -581,13 +581,13 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 if "OPENROUTER_API_KEY" not in st.session_state:
     st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 
-# modern CSS + animations
-# modern CSS — simplified professional theme, cleaner buttons
+
+# modern CSS — professional, roomy UI, subtle animations
 st.markdown("""
 <style>
 :root{
-  --bg: #0B1220;
-  --card: #0F1A2B;
+  --bg: #071025;
+  --card: #0E1B2A;
   --muted: #9AA6B2;
   --accent: #2AB7A9;
   --accent-2: #4D7CFE;
@@ -595,26 +595,29 @@ st.markdown("""
 }
 
 /* base */
-html, body, .stApp { background: var(--bg); color: #E6F0FA; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+html, body, .stApp { background: var(--bg); color: #E6F0FA; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding:0; margin:0; }
 a { color: var(--accent-2); }
 
 /* topbar / brand */
-.topbar{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; gap:12px; }
-.logo{ width:44px; height:44px; border-radius:10px; background: linear-gradient(135deg,var(--accent-2),var(--accent)); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 6px 18px rgba(0,0,0,0.6); }
-.title{ font-size:18px; font-weight:700; margin-bottom:2px; }
+.topbar{ display:flex; align-items:center; justify-content:space-between; padding:18px 24px; gap:12px; }
+.logo{ width:48px; height:48px; border-radius:10px; background: linear-gradient(135deg,var(--accent-2),var(--accent)); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 8px 28px rgba(0,0,0,0.6); }
+.title{ font-size:20px; font-weight:700; margin-bottom:2px; }
 .subtitle{ color:var(--muted); font-size:12px; }
 
 /* tabs row */
-.tabs-row{ display:flex; gap:8px; align-items:center; }
-.tab-btn{ padding:8px 12px; border-radius:10px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .14s ease; font-weight:600; cursor:pointer; }
-.tab-btn.active{ background:var(--card); color:#E9F7FF; border-color: rgba(255,255,255,0.04); box-shadow: 0 8px 24px rgba(0,0,0,0.55); }
+.tabs-row{ display:flex; gap:10px; align-items:center; }
+.tab-btn{ padding:10px 14px; border-radius:12px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .16s ease; font-weight:600; cursor:pointer; }
+.tab-btn.active{ background:var(--card); color:#E9F7FF; border-color: rgba(255,255,255,0.04); box-shadow: 0 10px 30px rgba(0,0,0,0.55); }
 
 /* cards, hero */
-.card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:16px; border-radius:12px; border:1px solid var(--glass); }
-.hero{ padding:20px; border-radius:12px; margin-bottom:14px; }
+.card{ background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005)); padding:18px; border-radius:14px; border:1px solid var(--glass); box-shadow: 0 8px 28px rgba(2,6,12,0.5); animation: fadeIn .28s ease; }
+.hero{ padding:22px; border-radius:14px; margin-bottom:18px; }
+
+/* subtle fade-in */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
 
 /* small text */
-.small-muted{ color:var(--muted); font-size:13px; }
+.small-muted{ color:var(--muted); font-size:13px; line-height:1.35; }
 
 /* streamlit button override — cleaner single style */
 div.stButton > button, button[kind="primary"]{
@@ -622,30 +625,35 @@ div.stButton > button, button[kind="primary"]{
   color: #ffffff !important;
   font-weight:700;
   border:none !important;
-  padding:8px 14px !important;
-  border-radius:10px !important;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  padding:10px 16px !important;
+  border-radius:12px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
   transition: transform .14s ease, box-shadow .14s ease;
 }
-div.stButton > button:hover{ transform:translateY(-3px); box-shadow: 0 12px 30px rgba(0,0,0,0.55); }
+div.stButton > button:hover{ transform:translateY(-4px); box-shadow: 0 16px 36px rgba(0,0,0,0.55); }
 
-/* inputs & selects */
+/* inputs & selects (more airy) */
 div.stSelectbox > div, div.stTextInput > div, div.stNumberInput > div{
-  border-radius:10px !important;
+  border-radius:12px !important;
   background: rgba(255,255,255,0.01) !important;
   border: 1px solid rgba(255,255,255,0.02) !important;
+  padding:8px !important;
 }
 
-/* compact preview */
-.slide-box{ background:#071019; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+/* slide viewer */
+.slide-box{ background:#061019; padding:14px; border-radius:10px; border:1px solid rgba(255,255,255,0.03); }
+
+/* thumbnail styling inside markdown imgs */
+.thumb-img{ width:100%; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
 
 /* responsive */
 @media (max-width: 900px){
-  .topbar{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .topbar{ flex-direction:column; align-items:flex-start; gap:10px; }
   .tabs-row{ flex-wrap:wrap; }
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # Decorative blobs (absolute positioned)
@@ -665,7 +673,9 @@ with st.container():
 TAB_NAMES = ["Home", "Upload & Process", "Lessons", "Chat Q&A", "Quizzes", "Flashcards", "Export", "Progress", "Settings"]
 # ---- Replace st.tabs with a controllable top nav so quick-action buttons can switch tabs ----
 if "active_tab" not in st.session_state:
-    st.session_state["active_tab"] = "Home"
+    # Open upload tab by default so users can start immediately
+    st.session_state["active_tab"] = "Upload & Process"
+
 
 # Render top tab buttons (simple, accessible — you can style them with CSS above)
 tab_cols = st.columns(len(TAB_NAMES))
@@ -875,47 +885,113 @@ elif active_tab == "Upload & Process":
                     log("Could not prepare download button:", e)
 
             # ---------- Preview: Text chunks or Slide viewer ----------
-            # unique key uses db_id or id to avoid duplication
             preview_key = f"view_mode_{upload_obj.get('db_id') or upload_obj.get('id')}"
             view_mode = st.radio("Preview mode", ["Text (chunks)", "Slide Viewer"], index=0, key=preview_key)
+
             if view_mode == "Text (chunks)":
                 with st.expander("Preview first 10 chunks (expand to view)"):
-                    st.write("Preview first 10 chunks:")
                     for i, c in enumerate(chunks[:10]):
                         st.code(c[:1200] + ("..." if len(c) > 1200 else ""))
             else:
-                st.write("Slide viewer — first 10 slides")
-                for s in upload_obj.get("slides", [])[:10]:
-                    st.markdown(f"**Slide {s['index']}**")
-                    imgs = s.get("images") or []
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
+
+                # viewer state key (unique per upload)
+                viewer_index_key = f"viewer_index_{upload_obj.get('db_id') or upload_obj.get('id')}"
+                if viewer_index_key not in st.session_state:
+                    st.session_state[viewer_index_key] = 0
+
+                slides_list = upload_obj.get("slides", []) or []
+                num_slides = len(slides_list)
+
+                # navigation row: Prev / label / Next
+                nav_c1, nav_c2, nav_c3 = st.columns([1,2,1])
+                with nav_c1:
+                    if st.button("◀ Prev", key=f"prev_{viewer_index_key}"):
+                        st.session_state[viewer_index_key] = max(0, st.session_state[viewer_index_key] - 1)
+                with nav_c2:
+                    st.markdown(f"### Slide {st.session_state[viewer_index_key] + 1} / {max(1, num_slides)}")
+                with nav_c3:
+                    if st.button("Next ▶", key=f"next_{viewer_index_key}"):
+                        st.session_state[viewer_index_key] = min(max(0, num_slides - 1), st.session_state[viewer_index_key] + 1)
+
+                # main area + side controls
+                main_col, side_col = st.columns([3,1])
+                cur_idx = st.session_state[viewer_index_key]
+                cur_slide = slides_list[cur_idx] if num_slides > 0 else {"index": 0, "text": "", "images": []}
+                imgs = cur_slide.get("images") or []
+
+                # Show main slide image (try PIL -> data URI for consistent rendering)
+                with main_col:
                     if imgs:
-                        # try to render each image robustly
-                        rendered = False
-                        for img_idx, img_bytes in enumerate(imgs[:2]):  # try first two images per slide
-                            if not img_bytes:
-                                continue
+                        img_bytes = imgs[0]
+                        try:
+                            from PIL import Image as PILImage
+                            pil = PILImage.open(io.BytesIO(img_bytes)).convert("RGB")
+                            # limit width for performance
+                            max_w = 1600
+                            w, h = pil.size
+                            if w > max_w:
+                                pil.thumbnail((max_w, int(h * max_w / w)))
+                            buf = io.BytesIO()
+                            pil.save(buf, format="PNG")
+                            data = base64.b64encode(buf.getvalue()).decode("utf-8")
+                            st.markdown(
+                                f"<img src='data:image/png;base64,{data}' style='width:100%;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.6);'/>",
+                                unsafe_allow_html=True
+                            )
+                        except Exception:
                             try:
-                                # st.image accepts bytes or PIL.Image; try bytes directly first
-                                st.image(img_bytes, use_column_width=True, caption=f"Slide {s['index']} — image {img_idx}", clamp=True)
-                                rendered = True
-                                break
+                                st.image(img_bytes, use_column_width=True, caption=f"Slide {cur_slide.get('index')}")
                             except Exception:
-                                try:
-                                    from PIL import Image as PILImage
-                                    pil_img = PILImage.open(io.BytesIO(img_bytes))
-                                    st.image(pil_img, use_column_width=True, caption=f"Slide {s['index']} — image {img_idx}")
-                                    rendered = True
-                                    break
-                                except Exception as e:
-                                    log(f"Failed to render slide image (slide {s['index']}, img {img_idx}):", e)
-                                    rendered = False
-                        if not rendered:
-                            st.info("Could not render slide image(s); showing extracted text instead.")
-                            st.write(s.get("text", ""))
+                                st.write(cur_slide.get("text", ""))
                     else:
-                        # no image: show extracted text as fallback
                         st.info("No image available for this slide — showing extracted text")
-                        st.write(s.get("text", ""))
+                        st.write(cur_slide.get("text", ""))
+
+                # Side controls: slider + thumbnails
+                with side_col:
+                    st.markdown("**Controls**")
+                    slide_select = st.slider("Go to slide", 1, max(1, num_slides), value=cur_idx + 1, key=f"slider_{viewer_index_key}")
+                    if slide_select - 1 != cur_idx:
+                        st.session_state[viewer_index_key] = slide_select - 1
+
+                    st.markdown("---")
+                    st.markdown("**Thumbnails**")
+
+                    # thumbnails grid (6 per row)
+                    thumbs = slides_list[:min(60, num_slides)]
+                    thumbs_per_row = 6
+                    for i in range(0, len(thumbs), thumbs_per_row):
+                        group = thumbs[i:i + thumbs_per_row]
+                        cols = st.columns(len(group))
+                        for ci, sthumb in enumerate(group):
+                            t_idx = sthumb.get("index", i + ci)
+                            t_img = (sthumb.get("images") or [None])[0]
+                            with cols[ci]:
+                                if t_img:
+                                    try:
+                                        from PIL import Image as PILImage
+                                        pil_t = PILImage.open(io.BytesIO(t_img)).convert("RGB")
+                                        pil_t.thumbnail((220, 140))
+                                        buft = io.BytesIO()
+                                        pil_t.save(buft, format="PNG")
+                                        tdata = base64.b64encode(buft.getvalue()).decode("utf-8")
+                                        st.markdown(f"<img src='data:image/png;base64,{tdata}' class='thumb-img'/>", unsafe_allow_html=True)
+                                    except Exception:
+                                        try:
+                                            st.image(t_img, use_column_width=True)
+                                        except Exception:
+                                            st.markdown(f"<div class='small-muted'>Slide {t_idx+1}</div>", unsafe_allow_html=True)
+                                else:
+                                    snippet = (sthumb.get("text") or "")[:90]
+                                    st.markdown(f"<div class='small-muted' style='font-size:12px;padding:6px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);'>{snippet}</div>", unsafe_allow_html=True)
+
+                                if st.button("Open", key=f"open_thumb_{upload_obj.get('id')}_{t_idx}"):
+                                    st.session_state[viewer_index_key] = t_idx
+
+                st.markdown("</div>", unsafe_allow_html=True)
+            # ---------------------------------------------------------
+
 
             # ---------------------------------------------------------
 
