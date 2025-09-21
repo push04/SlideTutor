@@ -172,20 +172,29 @@ def upload_db_id(upload: Dict) -> Optional[int]:
     """
     Return DB uploads.id for this upload dict if available.
     Prefer explicit 'db_id' key, otherwise attempt a DB lookup by filename.
+    Returns None if not resolvable.
     """
-    if upload is None:
+    if not upload:
         return None
-    if upload.get("db_id") is not None:
+
+    # Prefer explicit db_id if present and valid
+    dbid = upload.get("db_id")
+    if dbid is not None:
         try:
-            return int(upload.get("db_id"))
+            return int(dbid)
         except Exception:
+            # fallthrough to DB lookup
+            logger.debug("upload_db_id: invalid db_id in upload object: %s", dbid)
+
+    # Defensive DB lookup using cursor helper if available
+    try:
+        cur = _get_db_cursor()
+        if cur is None:
             return None
-    try:
-        cur = _db_conn.cursor()
-    except Exception:
-        return None
-    try:
-        cur.execute("SELECT id FROM uploads WHERE filename = ? ORDER BY uploaded_at DESC LIMIT 1", (upload.get("filename"),))
+        cur.execute(
+            "SELECT id FROM uploads WHERE filename = ? ORDER BY uploaded_at DESC LIMIT 1",
+            (upload.get("filename"),),
+        )
         row = cur.fetchone()
         if row:
             return int(row[0])
@@ -359,8 +368,14 @@ def embed_texts(model: "SentenceTransformer", texts: List[str]) -> np.ndarray:
 # ------------------------------
 
 def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
+    """
+    Extract slide-level text and embedded images from a PPTX file.
+    Returns list of dicts: {"index": int, "text": str, "images": List[bytes]}
+    Robust against unusual shapes and missing python-pptx.
+    """
     if not _HAS_PPTX or Presentation is None:
         return [{"index": 0, "text": "[python-pptx not installed]", "images": []}]
+
     slides: List[Dict] = []
     try:
         prs = Presentation(io.BytesIO(file_bytes))
@@ -368,23 +383,30 @@ def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
             texts: List[str] = []
             images: List[bytes] = []
             for shape in slide.shapes:
+                # Text extraction (robust)
                 try:
                     if getattr(shape, "has_text_frame", False):
-                        text_frame = getattr(shape, "text_frame", None)
-                        if text_frame:
-                            txt = "\n".join([p.text.strip() for p in text_frame.paragraphs if p.text and p.text.strip()])
-                            if txt:
-                                texts.append(txt)
+                        tf = getattr(shape, "text_frame", None)
+                        if tf:
+                            # concatenate non-empty paragraphs
+                            pts = [p.text.strip() for p in tf.paragraphs if getattr(p, "text", None) and p.text.strip()]
+                            if pts:
+                                texts.append("\n".join(pts))
                 except Exception:
-                    logger.debug("Skipping shape text extraction on slide %d due to exception.", i, exc_info=True)
+                    logger.debug("Skipping pptx shape text extraction on slide %d", i, exc_info=True)
+
+                # Image extraction (handles picture shapes)
                 try:
+                    # python-pptx picture shapes often have .image.blob
                     img = getattr(shape, "image", None)
                     if img is not None:
-                        image_bytes = getattr(img, "blob", None)
-                        if image_bytes:
-                            images.append(image_bytes)
+                        blob = getattr(img, "blob", None)
+                        if blob:
+                            images.append(blob)
                 except Exception:
-                    logger.debug("Skipping shape image extraction on slide %d due to exception.", i, exc_info=True)
+                    # some shapes may provide image via shape._pic or anchor; skip gracefully
+                    logger.debug("Skipping pptx shape image extraction on slide %d", i, exc_info=True)
+
             slides.append({"index": i, "text": "\n".join(texts).strip(), "images": images})
         return slides
     except Exception as e:
@@ -392,22 +414,32 @@ def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
         return [{"index": 0, "text": f"[pptx parse error] {e}", "images": []}]
 
 
+
 def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
+    """
+    Extract per-page text and images from a PDF (PyMuPDF). If a page has no selectable text
+    and no embedded images, render the page to an image (PNG bytes) and return that as the page image.
+    """
     if not _HAS_PYMUPDF or fitz is None:
         return [{"index": 0, "text": "[pymupdf not installed, can't parse PDF]", "images": []}]
+
     slides: List[Dict] = []
     doc = None
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        for i in range(doc.page_count):
+        page_count = getattr(doc, "page_count", None) or doc.pageCount if hasattr(doc, "pageCount") else len(doc)
+        for i in range(page_count):
             page = doc.load_page(i)
+            # extract selectable text if any
             try:
                 text = page.get_text("text") or ""
                 text = text.strip()
             except Exception:
                 logger.debug("Page %d: text extraction failed; treating as empty.", i, exc_info=True)
                 text = ""
+
             images: List[bytes] = []
+            # try to extract embedded images
             try:
                 for img in page.get_images(full=True):
                     xref = img[0]
@@ -420,10 +452,13 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
                         logger.debug("Failed to extract image xref %s on page %d", xref, i, exc_info=True)
             except Exception:
                 logger.debug("get_images failed on page %d", i, exc_info=True)
+
+            # If page has neither selectable text nor embedded images, rasterize page to PNG
             if (not text) and (not images):
                 try:
-                    mat = fitz.Matrix(2.0, 2.0)
+                    mat = fitz.Matrix(2.0, 2.0)  # raster scale (2x)
                     pix = page.get_pixmap(matrix=mat, alpha=False)
+                    # PyMuPDF versions differ on pix.tobytes signature
                     try:
                         img_bytes = pix.tobytes(output="png")
                     except TypeError:
@@ -431,6 +466,7 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
                     images.append(img_bytes)
                 except Exception as e:
                     logger.debug("PDF page rendering failed for page %d: %s", i, e, exc_info=True)
+
             slides.append({"index": i, "text": text, "images": images})
         return slides
     except Exception as e:
@@ -443,33 +479,54 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
             except Exception:
                 pass
 
+
 # ------------------------------
 # EasyOCR reader & OCR
 # ------------------------------
 
 @_cache_decorator
 def get_easyocr_reader(lang_list: List[str] = ["en"]):
+    """
+    Return an EasyOCR reader instance or None if easyocr not available.
+    Cached to avoid re-initializing repeatedly.
+    """
     if not _HAS_EASYOCR or easyocr is None:
+        logger.info("EasyOCR not available in this environment.")
         return None
+
     try:
-        reader = easyocr.Reader(lang_list, gpu=False)
+        # allow passing list or comma-separated string
+        langs = lang_list if isinstance(lang_list, (list, tuple)) else [l.strip() for l in str(lang_list).split(",") if l.strip()]
+        reader = easyocr.Reader(langs, gpu=False)
         return reader
     except Exception as e:
         logger.warning("easyocr init failed: %s", e)
         return None
 
 
+
 def ocr_image_bytes_list(image_bytes_list: List[bytes]) -> List[str]:
-    results = []
+    """
+    Run OCR on a list of image bytes and return list of extracted texts (one per image).
+    Returns empty string for pages where OCR fails or reader not available.
+    """
+    results: List[str] = []
     reader = get_easyocr_reader(["en"])
-    for b in image_bytes_list:
+    for idx, b in enumerate(image_bytes_list or []):
         if not b:
             results.append("")
             continue
         try:
             img = Image.open(io.BytesIO(b)).convert("RGB")
-            if _HAS_EASYOCR and reader is not None:
+        except Exception as e:
+            logger.debug("ocr_image_bytes_list: PIL open failed for image %d: %s", idx, e)
+            results.append("")
+            continue
+
+        if _HAS_EASYOCR and reader is not None:
+            try:
                 arr = np.array(img)
+                # easyocr Reader.readtext signature changed historically: try paragraph=True then fallback
                 try:
                     raw = reader.readtext(arr, detail=0, paragraph=True)
                 except TypeError:
@@ -479,12 +536,14 @@ def ocr_image_bytes_list(image_bytes_list: List[bytes]) -> List[str]:
                 else:
                     txt = str(raw)
                 results.append(txt.strip())
-            else:
+            except Exception as e:
+                logger.debug("easyocr readtext failed for image %d: %s", idx, e, exc_info=True)
                 results.append("")
-        except Exception as e:
-            logger.debug("OCR error: %s", e)
+        else:
+            # no OCR available
             results.append("")
     return results
+
 
 # ------------------------------
 # Text chunker (user-facing helper)
@@ -644,51 +703,89 @@ def generate_flashcards_from_text(text: str, n: int = 10) -> List[Dict]:
 # ------------------------------
 
 def sm2_update_card(easiness: float, interval: int, repetitions: int, quality: int) -> Tuple[float, int, int, int]:
-    q = quality
+    """
+    SM-2 algorithm update. Returns (easiness, interval, repetitions, next_review_timestamp).
+    """
+    try:
+        q = int(quality)
+    except Exception:
+        q = 0
+
+    eas = float(easiness or 2.5)
+    inter = int(interval or 1)
+    reps = int(repetitions or 0)
+
     if q < 3:
-        repetitions = 0
-        interval = 1
+        reps = 0
+        inter = 1
     else:
-        repetitions += 1
-        if repetitions == 1:
-            interval = 1
-        elif repetitions == 2:
-            interval = 6
+        reps += 1
+        if reps == 1:
+            inter = 1
+        elif reps == 2:
+            inter = 6
         else:
-            interval = max(1, int(round(interval * easiness)))
-    easiness = max(1.3, easiness + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
-    next_review = int(time.time()) + int(interval) * 24 * 3600
-    return easiness, interval, repetitions, next_review
+            inter = max(1, int(round(inter * eas)))
+
+    eas = max(1.3, eas + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+    next_review = int(time.time()) + int(inter) * 24 * 3600
+    return eas, inter, reps, next_review
+
 
 # ------------------------------
 # Export & TTS helpers
 # ------------------------------
 
-def anki_export_csv_for_upload(upload_id: int, conn: sqlite3.Connection) -> Tuple[str, bytes]:
-    c = conn.cursor()
-    c.execute("SELECT question, answer FROM flashcards WHERE upload_id = ?", (upload_id,))
-    rows = c.fetchall() or []
-    lines = []
-    for q, a in rows:
-        q2 = (q or "").replace("\t", " ").replace("\n", " ")
-        a2 = (a or "").replace("\t", " ").replace("\n", " ")
-        lines.append(f"{q2}\t{a2}")
-    csv_bytes = "\n".join(lines).encode("utf-8")
-    fname = f"slide_tutor_upload_{upload_id}_flashcards.txt"
-    return fname, csv_bytes
+def anki_export_csv_for_upload(upload_id: int, conn: sqlite3.Connection) -> Optional[Tuple[str, bytes]]:
+    """
+    Export flashcards for a given upload_id as TSV suitable for Anki import.
+    Returns (filename, bytes) or None on error.
+    """
+    if conn is None:
+        logger.debug("anki_export_csv_for_upload: no DB connection provided.")
+        return None
+    try:
+        c = conn.cursor()
+        c.execute("SELECT question, answer FROM flashcards WHERE upload_id = ?", (upload_id,))
+        rows = c.fetchall() or []
+        lines = []
+        for q, a in rows:
+            q2 = (q or "").replace("\t", " ").replace("\n", " ")
+            a2 = (a or "").replace("\t", " ").replace("\n", " ")
+            lines.append(f"{q2}\t{a2}")
+        csv_bytes = "\n".join(lines).encode("utf-8")
+        fname = f"slide_tutor_upload_{upload_id}_flashcards.txt"
+        return fname, csv_bytes
+    except Exception as e:
+        logger.exception("anki_export_csv_for_upload failed: %s", e)
+        return None
+
 
 
 def text_to_speech_download(text: str, lang: str = "en") -> Tuple[str, bytes]:
+    """
+    Use gTTS to synthesize text to MP3 bytes. Raises RuntimeError with helpful message if not available.
+    """
     if not _HAS_GTTS or gTTS is None:
-        raise RuntimeError("gTTS not installed (pip install gTTS)")
-    tts = gTTS(text=text, lang=lang)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tmp.close()
-    tts.save(tmp.name)
-    with open(tmp.name, "rb") as fh:
-        b = fh.read()
-    os.unlink(tmp.name)
-    return "lesson_audio.mp3", b
+        raise RuntimeError("gTTS not installed (pip install gTTS) or not available in this environment.")
+    if not text:
+        raise ValueError("No text provided for TTS.")
+    try:
+        tts = gTTS(text=text, lang=lang)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        tmp.close()
+        tts.save(tmp.name)
+        with open(tmp.name, "rb") as fh:
+            b = fh.read()
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+        return "lesson_audio.mp3", b
+    except Exception as e:
+        logger.exception("text_to_speech_download failed: %s", e)
+        raise
+
 
 # ------------------------------
 # Streamlit UI
@@ -757,6 +854,10 @@ if "uploads" not in st.session_state:
 # helpers
 
 def _simple_chunk_text(text: str, chunk_size: int = 800, overlap: int = 80) -> List[str]:
+    """
+    Split text into roughly chunk_size-character segments with 'overlap' characters overlap.
+    Keeps paragraphs together when possible.
+    """
     if not text:
         return []
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
@@ -771,34 +872,46 @@ def _simple_chunk_text(text: str, chunk_size: int = 800, overlap: int = 80) -> L
             end = min(L, start + chunk_size)
             chunk = p[start:end].strip()
             chunks.append(chunk)
-            if end == L:
+            if end >= L:
                 break
             start = max(0, end - overlap)
     return chunks
 
 
 def _make_upload_id(filename: str) -> str:
+    """Return a short pseudo-unique upload id based on filename + timestamp hash."""
     import hashlib
-    h = hashlib.sha1((filename + str(time.time())).encode("utf-8")).hexdigest()[:10]
-    return f"{h}_{filename}"
+    h = hashlib.sha1((filename + str(time.time())).encode("utf-8")).hexdigest()[:12]
+    safe_name = filename.replace(" ", "_")
+    return f"{h}_{safe_name}"
 
 
 def add_upload_file(uploaded_file) -> Dict:
+    """
+    Process UploadedFile-like into upload dict:
+    - extracts slides (pptx/pdf)
+    - runs per-slide chunking (uses chunk_text() if present)
+    - builds mapping list and 'full_text'
+    """
     try:
         fb = uploaded_file.read()
     except Exception as e:
         st.error(f"Failed to read uploaded file: {e}")
         return {}
+
     filename = getattr(uploaded_file, "name", None) or getattr(uploaded_file, "filename", None) or "<uploaded_file>"
     ext = filename.lower().split(".")[-1]
     kind = "pdf" if ext == "pdf" else "pptx" if ext in ("pptx", "ppt") else "unknown"
-    slides = []
+
+    # extract slides
+    slides: List[Dict] = []
     try:
         if kind == "pptx":
             slides = extract_from_pptx_bytes(fb)
         elif kind == "pdf":
             slides = extract_from_pdf_bytes(fb)
         else:
+            # try pdf then pptx as fallback
             try:
                 slides = extract_from_pdf_bytes(fb)
             except Exception:
@@ -807,64 +920,147 @@ def add_upload_file(uploaded_file) -> Dict:
                 except Exception:
                     slides = [{"index": 0, "text": "[unsupported format]", "images": []}]
     except Exception as e:
+        logger.exception("add_upload_file extraction failed: %s", e)
         slides = [{"index": 0, "text": f"[extraction failed] {e}", "images": []}]
+
+    # build chunks and mapping (prefer user's chunk_text if available)
     chunks: List[str] = []
+    mapping: List[Dict[str, Any]] = []
     for s in slides:
+        sidx = int(s.get("index", 0))
         text = s.get("text", "") or ""
-        per_slide_chunks = _simple_chunk_text(text)
-        for c in per_slide_chunks:
-            chunks.append(f"[slide {s.get('index',0)}] {c}")
-    upload = {"id": _make_upload_id(filename), "filename": filename, "bytes": fb, "kind": kind, "slides": slides, "chunks": chunks, "embeddings": None, "index": None, "index_built": False, "status_msg": "Uploaded"}
+        try:
+            if "chunk_text" in globals() and callable(globals()["chunk_text"]):
+                parts = globals()["chunk_text"](text)
+            else:
+                parts = _simple_chunk_text(text)
+        except Exception as e:
+            logger.debug("chunking failed for slide %s: %s", sidx, e)
+            parts = _simple_chunk_text(text)
+
+        for p in parts:
+            chunks.append(p)
+            mapping.append({"slide": sidx, "text": p})
+
+    # full_text: concatenated slide texts (useful for whole-doc operations)
+    full_text = "\n\n".join([(s.get("text") or "").strip() for s in slides]).strip()
+    upload = {
+        "id": _make_upload_id(filename),
+        "filename": filename,
+        "bytes": fb,
+        "kind": kind,
+        "slides": slides,
+        "slide_count": len(slides),
+        "full_text": full_text,
+        "chunks": chunks,
+        "mapping": mapping,
+        "embeddings": None,
+        "index": None,
+        "index_built": False,
+        "status_msg": "Uploaded",
+    }
+
+    if "uploads" not in st.session_state:
+        st.session_state["uploads"] = []
     st.session_state["uploads"].append(upload)
     return upload
 
 
-def build_index_for_upload(upload: Dict, model_name: Optional[str] = None) -> Dict:
+
+def build_index_for_upload(upload: Dict, model_name: Optional[str] = None, use_full_text: bool = False) -> Dict:
+    """
+    Build embeddings and a VectorIndex for an upload.
+    - If use_full_text is True, embed the concatenated full_text as a single vector.
+    - Otherwise embed upload['chunks'] as usual.
+    Returns the modified upload dict (in-place).
+    """
     if upload is None:
         raise ValueError("upload is None")
+
+    model_name = model_name or globals().get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+
+    # attempt to load model
     try:
-        model_name = model_name or globals().get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+        model = load_sentence_transformer(model_name)
+    except Exception as e:
+        upload["status_msg"] = f"Embedding model load failed: {e}"
+        logger.debug(upload["status_msg"])
+        st.error(upload["status_msg"])
+        return upload
+
+    # choose texts to embed
+    if use_full_text:
+        texts = []
+        ft = upload.get("full_text", "") or ""
+        if not ft:
+            # fallback: join chunks
+            texts = ["\n\n".join(upload.get("chunks", []) or [])]
+        else:
+            texts = [ft]
+    else:
+        texts = upload.get("chunks", []) or []
+
+    if not texts:
+        # create zero-sized embeddings with known dim if possible
         try:
-            model = load_sentence_transformer(model_name)
-        except Exception as e:
-            upload["status_msg"] = f"Embedding model load failed: {e}"
-            st.error(upload["status_msg"])
-            return upload
-        chunks = upload.get("chunks", []) or []
-        if not chunks:
-            try:
-                dim = model.get_sentence_embedding_dimension()
-            except Exception:
-                dim = 0
-            upload["embeddings"] = np.zeros((0, dim), dtype=np.float32) if dim > 0 else np.zeros((0, 0), dtype=np.float32)
-            upload["index"] = VectorIndex(upload["embeddings"], [])
-            upload["index_built"] = True
-            upload["status_msg"] = "No chunks to embed (empty file)."
-            st.success(upload["status_msg"])
-            return upload
+            dim = model.get_sentence_embedding_dimension()
+        except Exception:
+            dim = 0
+        if dim > 0:
+            upload["embeddings"] = np.zeros((0, dim), dtype=np.float32)
+        else:
+            upload["embeddings"] = np.zeros((0, 0), dtype=np.float32)
+        upload["index"] = VectorIndex(upload["embeddings"], [])
+        upload["index_built"] = True
+        upload["status_msg"] = "No texts to embed (empty)."
+        st.success(upload["status_msg"])
+        return upload
+
+    # compute embeddings
+    try:
         with st.spinner("Computing embeddings..."):
-            arr = embed_texts(model, chunks)
+            arr = embed_texts(model, texts)
             if arr is None:
                 raise RuntimeError("embed_texts returned None")
             arr = np.asarray(arr, dtype=np.float32)
             upload["embeddings"] = arr
-            upload["index"] = VectorIndex(arr, chunks)
+            # If use_full_text we still want index to reference texts (single entry)
+            upload["index"] = VectorIndex(arr, texts)
             upload["index_built"] = True
-            upload["status_msg"] = f"Index built ({arr.shape[0]} vectors, dim={arr.shape[1] if arr.ndim>1 else 'unknown'})"
+            upload["status_msg"] = f"Index built ({arr.shape[0]} vectors, dim={arr.shape[1] if arr.ndim > 1 else 'unknown'})"
             st.success(upload["status_msg"])
             return upload
     except Exception as ex:
         upload["status_msg"] = f"Index build failed: {ex}"
+        logger.exception("build_index_for_upload failed: %s", ex)
         st.error(upload["status_msg"])
+        # fallback to empty index so other code doesn't crash
+        upload["embeddings"] = np.zeros((0, 0), dtype=np.float32)
+        upload["index"] = VectorIndex(upload["embeddings"], upload.get("chunks", []))
+        upload["index_built"] = False
         return upload
 
 
+
 def download_upload_json(upload: Dict) -> None:
-    safe = {"filename": upload.get("filename"), "kind": upload.get("kind"), "slides": [{"index": s.get("index"), "text": s.get("text"), "images": len(s.get("images", []))} for s in upload.get("slides", [])], "chunks_count": len(upload.get("chunks", []))}
-    payload = json.dumps(safe, indent=2)
+    """
+    Render a data: URL download link for the upload metadata (slides & chunks).
+    """
+    if not upload:
+        st.warning("No upload provided for download.")
+        return
+    safe = {
+        "filename": upload.get("filename"),
+        "kind": upload.get("kind"),
+        "slide_count": upload.get("slide_count", len(upload.get("slides", []))),
+        "slides": [{"index": s.get("index"), "text": s.get("text"), "images": len(s.get("images", []))} for s in upload.get("slides", [])],
+        "chunks_count": len(upload.get("chunks", [])),
+    }
+    payload = json.dumps(safe, indent=2, ensure_ascii=False)
     b64 = base64.b64encode(payload.encode()).decode()
     href = f'<a href="data:application/json;base64,{b64}" download="{upload.get("filename")}_meta.json">Download metadata (JSON)</a>'
     st.markdown(href, unsafe_allow_html=True)
+
 
 # ---------- Home tab ----------
 if active_tab := st.session_state.get("active_tab") == "Home":
@@ -873,7 +1069,7 @@ if active_tab := st.session_state.get("active_tab") == "Home":
     with c1:
         st.markdown(f"<h2 style='margin:0'>Welcome to <span style='color:#a79bff'>{APP_TITLE}</span></h2>", unsafe_allow_html=True)
         st.markdown(f"<div class='small-muted'>Quickly upload slide decks (PPTX/PDF), build searchable semantic indices, and auto-generate lessons, quizzes and flashcards.</div>", unsafe_allow_html=True)
-        st.markdown("<br/>")
+        
         st.markdown("<div class='small-muted'>Highlights:</div>", unsafe_allow_html=True)
         st.markdown("<ul class='small-muted'><li>Scanned PDFs supported (raster fallback)</li><li>On-demand embedding / search (FAISS if available)</li><li>Export metadata & previews</li></ul>", unsafe_allow_html=True)
         st.markdown("<div class='small-actions'>", unsafe_allow_html=True)
@@ -936,7 +1132,7 @@ if st.session_state.get("active_tab") == "Upload & Process":
                         images = s.get("images", []) or []
                         if images:
                             try:
-                                st.image(images[0], caption=f"Slide {s.get('index')} preview", use_column_width=True)
+                                st.image(images[0], caption=f"Slide {s.get('index')} preview", use_container_width=True)
                             except Exception:
                                 st.markdown("<div class='small-muted'>[image preview not renderable]</div>", unsafe_allow_html=True)
                         st.markdown("---")
@@ -948,7 +1144,7 @@ if st.session_state.get("active_tab") == "Upload & Process":
                     if st.button("Delete", key=f"del_{up['id']}"):
                         st.session_state["uploads"].pop(idx)
                         st.experimental_rerun()
-                    st.markdown("<br/>")
+                    
                     st.markdown(f"<div class='small-muted'>{up.get('status_msg','')}</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1331,6 +1527,8 @@ if active_tab == "Upload & Process":
                             if w > max_w:
                                 pil.thumbnail((max_w, int(h * max_w / w)))
                             st.image(pil, use_container_width=True, caption=f"Slide {cur_slide.get('index') + 1}")
+                            
+
                         except Exception:
                             try:
                                 st.image(img_bytes, use_container_width=True, caption=f"Slide {cur_slide.get('index') + 1}")
@@ -1402,7 +1600,9 @@ if active_tab == "Upload & Process":
             log("Unhandled upload processing error:", e, getattr(e, "__traceback__", None))
 
 # --------------------------
-# Lessons tab
+# --------------------------
+# Lessons, Chat Q&A, Quizzes, Flashcards, Export, Progress, Settings
+# Unified robust replacement block
 # --------------------------
 elif active_tab == "Lessons":
     st.header("Generate Multi-level Lessons")
@@ -1410,90 +1610,171 @@ elif active_tab == "Lessons":
     if not uploads:
         st.info("No uploads yet. Go to Upload & Process.")
     else:
+        # choose upload
         options = {u["id"]: u["filename"] for u in uploads}
         sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_lessons")
-        upload = next((u for u in uploads if u["id"] == sel_id), None)
+        upload_idx = next((i for i, u in enumerate(uploads) if u["id"] == sel_id), None)
+        upload = uploads[upload_idx] if upload_idx is not None else None
+
         if upload is None:
             st.warning("Selected upload not found.")
         else:
-            # provide context mode: indexed search / whole document / slide-wise
-            context_mode = st.radio("Context source for lesson generation", ["Indexed search (best)", "Whole document", "Specific slide"], index=0)
+            # Show summary + index build controls
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.markdown(f"**File:** {upload.get('filename')} — slides: {upload.get('slide_count', len(upload.get('slides', [])))}")
+            st.markdown(f"<div class='small-muted'>Index built: {bool(upload.get('index_built'))} • Status: {upload.get('status_msg','')}</div>", unsafe_allow_html=True)
+
+            # Offer index build buttons (chunked vs whole-doc)
+            cols = st.columns([1, 1, 2])
+            with cols[0]:
+                if st.button("Build / Rebuild Index (chunked)", key=f"build_chunked_{sel_id}"):
+                    try:
+                        st.session_state["uploads"][upload_idx] = build_index_for_upload(upload, use_full_text=False)
+                        st.success("Chunked index build attempted.")
+                    except Exception as e:
+                        st.error(f"Chunked index build failed: {e}")
+                        log("build chunked error:", e)
+            with cols[1]:
+                if st.button("Build / Rebuild Index (whole doc)", key=f"build_whole_{sel_id}"):
+                    try:
+                        st.session_state["uploads"][upload_idx] = build_index_for_upload(upload, use_full_text=True)
+                        st.success("Whole-document index build attempted.")
+                    except Exception as e:
+                        st.error(f"Whole-document index build failed: {e}")
+                        log("build whole-doc error:", e)
+            with cols[2]:
+                if st.button("Preview all slides (expand)"):
+                    st.session_state[f"preview_all_{sel_id}"] = not st.session_state.get(f"preview_all_{sel_id}", False)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            # preview: all slides option
+            if st.session_state.get(f"preview_all_{sel_id}", False):
+                slides = upload.get("slides", []) or []
+                if slides:
+                    for s in slides:
+                        st.markdown(f"#### Slide {int(s.get('index', 0)) + 1}")
+                        images = s.get("images") or []
+                        if images:
+                            # show first image for the page
+                            try:
+                                st.image(images[0], caption=f"Slide {s.get('index') + 1}", use_container_width=True)
+                            except Exception:
+                                # ensure safe fallback: don't crash
+                                st.text("Image preview unavailable.")
+                        text_val = s.get("text", "") or ""
+                        if text_val:
+                            with st.expander("Show text", expanded=False):
+                                st.write(text_val)
+                else:
+                    st.info("No slides found.")
+
+            # Context mode selection - indexed / whole / specific slide
+            context_mode = st.radio("Context source for lesson generation",
+                                    ["Indexed search (best)", "Whole document", "Specific slide"], index=0, key=f"lesson_ctx_mode_{sel_id}")
 
             slides = upload.get("slides", []) or []
-            max_idx = max([int(s["index"]) for s in slides]) if slides else 0
-            slide_idx = 0
-            if context_mode == "Specific slide":
-                slide_idx = st.number_input("Slide/Page index to focus on", min_value=0, max_value=max_idx, value=0)
-                slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(slide_idx)), "")
-            else:
-                # For "Whole document" and "Indexed search", derive slide_text from selection
-                slide_text = ""
-                if context_mode == "Whole document":
-                    slide_text = "\n\n".join([s.get("text", "") for s in slides])
+            max_idx = max([int(s.get("index", 0)) for s in slides]) if slides else 0
 
-                elif context_mode == "Indexed search":
-                    # let user optionally choose a slide for the 'seed' slide_text
-                    seed_choice = st.checkbox("Seed with a specific slide text for relevance (optional)")
-                    if seed_choice:
-                        slide_idx = st.number_input("Seed slide index", min_value=0, max_value=max_idx, value=0)
-                        slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(slide_idx)), "")
-                    else:
-                        # fallback to whole doc if no seed provided
-                        slide_text = "\n\n".join([s.get("text", "") for s in slides])
+            # Seed text (used as 'query' in indexed search or as slide text)
+            seed_slide_text = ""
+            seed_slide_idx = 0
+            if context_mode == "Specific slide":
+                seed_slide_idx = st.number_input("Slide/Page index to focus on", min_value=0, max_value=max_idx, value=0, key=f"lesson_slide_idx_{sel_id}")
+                seed_slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
+            elif context_mode == "Indexed search (best)":
+                seed_with_slide = st.checkbox("Seed with a specific slide's text (optional)", key=f"seed_slide_chk_{sel_id}")
+                if seed_with_slide:
+                    seed_slide_idx = st.number_input("Seed slide index", min_value=0, max_value=max_idx, value=0, key=f"lesson_seed_idx_{sel_id}")
+                    seed_slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
+                else:
+                    # default seed is the whole document concatenation (helps when no specific slide)
+                    seed_slide_text = "\n\n".join([s.get("text", "") for s in slides])
+            else:
+                # whole document
+                seed_slide_text = "\n\n".join([s.get("text", "") for s in slides])
 
             st.markdown("<div class='card'>", unsafe_allow_html=True)
             st.subheader("Preview (seed text used for generation)")
-            st.write(slide_text if len(slide_text) < 4000 else slide_text[:4000] + "...")
+            if seed_slide_text:
+                st.write(seed_slide_text if len(seed_slide_text) < 4000 else seed_slide_text[:4000] + "...")
+            else:
+                st.write("[no seed text available for this selection]")
             st.markdown("</div>", unsafe_allow_html=True)
 
-            deep = st.checkbox("Produce a deeply detailed lesson (longer, step-by-step)", value=False)
-            auto_create = st.checkbox("Also auto-create quiz + flashcards and save to DB", value=True)
+            # generation options
+            deep = st.checkbox("Produce a deeply detailed lesson (longer, step-by-step)", value=False, key=f"lesson_deep_{sel_id}")
+            auto_create = st.checkbox("Also auto-create quiz + flashcards and save to DB", value=True, key=f"lesson_autocreate_{sel_id}")
+            max_q_tokens = st.slider("Max tokens for LLM response (approx)", min_value=256, max_value=4000, value=900, key=f"lesson_max_tokens_{sel_id}")
 
-            if st.button("Generate Lesson (Beginner→Advanced)"):
+            # generate lesson
+            if st.button("Generate Lesson (Beginner → Advanced)", key=f"gen_lesson_{sel_id}"):
                 snippets: List[str] = []
-                # If user chose Indexed search, try to use the built index
-                if context_mode == "Indexed search":
-                    idx = upload.get("index")
-                    if idx and upload.get("chunks"):
-                        try:
-                            if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]):
-                                model = load_sentence_transformer()
-                                q_emb = embed_texts(model, [slide_text])
-                                D, I = idx.search(q_emb, globals().get("TOP_K", TOP_K))
-                                for j in (I[0] if len(I) > 0 else []):
-                                    if isinstance(j, int) and 0 <= j < len(upload.get("chunks", [])):
-                                        slide_num = upload["mapping"][j]["slide"] if j < len(upload["mapping"]) else None
-                                        prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
-                                        snippets.append(prefix + upload["chunks"][j])
-                        except Exception as e:
-                            log("Index search failed:", e)
-                    # if no results or no index, fall back to whole doc
-                    if not snippets:
-                        snippets = [s for s in upload.get("chunks", [])[:TOP_K]]
-                elif context_mode == "Whole document":
+                try:
+                    if context_mode == "Indexed search (best)":
+                        idx = upload.get("index")
+                        if idx and upload.get("chunks"):
+                            try:
+                                # load model and embed seed text (if available)
+                                if seed_slide_text:
+                                    model = load_sentence_transformer() if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]) else None
+                                    if model is not None:
+                                        q_emb = embed_texts(model, [seed_slide_text])
+                                        D, I = idx.search(q_emb, int(st.session_state.get("TOP_K", TOP_K)))
+                                        # iterate results and build snippets
+                                        for j in (I[0] if len(I) > 0 else []):
+                                            if isinstance(j, int) and 0 <= j < len(upload.get("chunks", [])):
+                                                slide_num = upload.get("mapping", [{}])[j].get("slide") if j < len(upload.get("mapping", [])) else None
+                                                prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
+                                                snippets.append(prefix + upload["chunks"][j])
+                                # if no seed or no model/index results: fallback to top chunks
+                                if not snippets:
+                                    snippets = upload.get("chunks", [])[: int(st.session_state.get("TOP_K", TOP_K))]
+                            except Exception as e:
+                                log("Indexed search failed; falling back to whole document:", e)
+                                snippets = ["\n\n".join([s.get("text","") for s in slides])]
+                        else:
+                            # no index available — fallback to whole doc with user notice
+                            st.warning("Index not available for this upload — falling back to whole document context.")
+                            snippets = ["\n\n".join([s.get("text","") for s in slides])]
+
+                    elif context_mode == "Whole document":
+                        snippets = ["\n\n".join([s.get("text", "") for s in slides])]
+
+                    elif context_mode == "Specific slide":
+                        snippets = [seed_slide_text]
+                except Exception as e:
+                    log("Failed to assemble context snippets:", e)
                     snippets = ["\n\n".join([s.get("text", "") for s in slides])]
-                elif context_mode == "Specific slide":
-                    snippets = [slide_text]
 
-                related = "\n\n".join(snippets)
+                related = "\n\n".join([s for s in snippets if s])
 
+                # call LLM via safe helper
                 with st.spinner("Generating lesson via LLM..."):
                     try:
                         if deep:
-                            lesson = _safe_call("generate_deep_lesson", slide_text, related, default=None)
+                            lesson = _safe_call("generate_deep_lesson", seed_slide_text, related, default=None)
                         else:
-                            lesson = _safe_call("generate_multilevel_lesson", slide_text, related, default=None)
+                            lesson = _safe_call("generate_multilevel_lesson", seed_slide_text, related, default=None)
                         if lesson is None:
-                            st.warning("Lesson-generation function not available in this environment.")
+                            st.warning("Lesson-generation function not available in this runtime.")
                             lesson = "[Lesson generation not available]"
                     except Exception as e:
                         lesson = f"[Lesson generation failed: {e}]"
                         log("Lesson generation error:", e)
+
                 st.subheader("Generated Lesson")
                 st.markdown(lesson)
 
+                # copy to clipboard (browser) — streamlit has no direct clipboard API, provide JS fallback
+                try:
+                    st.button("Copy Lesson Text", key=f"copy_lesson_{sel_id}")
+                    st.markdown(f"<textarea readonly style='width:100%;height:120px'>{lesson}</textarea>", unsafe_allow_html=True)
+                except Exception:
+                    pass
+
+                # auto-create MCQs and flashcards
                 if auto_create:
-                    st.info("Attempting to auto-generate MCQs and flashcards from lesson and saving to DB.")
+                    st.info("Attempting to auto-generate MCQs and flashcards from lesson and saving to DB (if available).")
                     mcqs = _safe_call("generate_mcq_set_from_text", lesson, qcount=8, default=[])
                     fcards = _safe_call("generate_flashcards_from_text", lesson, n=12, default=[])
                     cur = _get_db_cursor()
@@ -1502,12 +1783,20 @@ elif active_tab == "Lessons":
                     else:
                         try:
                             db_uid = upload_db_id(upload)
+                            inserted_f = 0
+                            inserted_q = 0
                             for q in mcqs or []:
-                                cur.execute(
-                                    "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                    (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0), int(time.time())),
-                                )
-                            inserted = 0
+                                # validate question structure
+                                question_text = q.get("question", "") if isinstance(q, dict) else ""
+                                options = q.get("options", []) if isinstance(q, dict) else []
+                                ans_idx = int(q.get("answer_index", 0) if isinstance(q, dict) and q.get("answer_index") is not None else 0)
+                                if question_text:
+                                    cur.execute(
+                                        "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                                        (db_uid, question_text, json.dumps(options), ans_idx, int(time.time())),
+                                    )
+                                    inserted_q += 1
+
                             for card in fcards or []:
                                 qtext = card.get("q") or card.get("question") or ""
                                 atext = card.get("a") or card.get("answer") or ""
@@ -1516,18 +1805,19 @@ elif active_tab == "Lessons":
                                         "INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
                                         (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())),
                                     )
-                                    inserted += 1
+                                    inserted_f += 1
                             _db_conn.commit()
-                            st.success(f"Saved {len(mcqs or [])} MCQs and {inserted} flashcards to DB (if any).")
+                            st.success(f"Saved {inserted_q} MCQs and {inserted_f} flashcards to DB.")
                         except Exception as e:
                             st.warning(f"Could not save generated artifacts: {e}")
+                            log("save artifacts error:", e)
 
-                # Optional TTS export with gTTS
-                if globals().get("_HAS_GTTS") and st.button("Export lesson as MP3 (TTS)"):
+                # optional TTS export
+                if globals().get("_HAS_GTTS") and st.button("Export lesson as MP3 (TTS)", key=f"tts_lesson_{sel_id}"):
                     try:
                         fname, mp3bytes = _safe_call("text_to_speech_download", lesson, default=(None, None))
                         if fname and mp3bytes:
-                            st.download_button("Download lesson audio", mp3bytes, file_name=fname, mime="audio/mpeg")
+                            st.download_button("Download lesson audio", mp3bytes, file_name=fname, mime="audio/mpeg", key=f"dl_tts_{sel_id}")
                         else:
                             st.warning("TTS helper not available or returned no data.")
                     except Exception as e:
@@ -1544,44 +1834,55 @@ elif active_tab == "Chat Q&A":
     else:
         options = {u["id"]: u["filename"] for u in uploads}
         sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_chat")
-        upload = next((u for u in uploads if u["id"] == sel_id), None)
-        if upload:
+        upload_idx = next((i for i, u in enumerate(uploads) if u["id"] == sel_id), None)
+        upload = uploads[upload_idx] if upload_idx is not None else None
+
+        if not upload:
+            st.warning("Selected upload not found.")
+        else:
             # context selection similar to Lessons
-            context_mode = st.radio("Context source", ["Indexed search (best)", "Whole document", "Specific slide"], index=0)
+            context_mode = st.radio("Context source", ["Indexed search (best)", "Whole document", "Specific slide"], index=0, key=f"chat_ctx_mode_{sel_id}")
             slides = upload.get("slides", []) or []
-            max_idx = max([int(s["index"]) for s in slides]) if slides else 0
+            max_idx = max([int(s.get("index", 0)) for s in slides]) if slides else 0
             seed_slide = 0
             if context_mode == "Specific slide":
-                seed_slide = st.number_input("Slide index for context", min_value=0, max_value=max_idx, value=0)
-            question = st.text_area("Ask a question about the slides/pages")
+                seed_slide = st.number_input("Slide index for context", min_value=0, max_value=max_idx, value=0, key=f"chat_seed_slide_{sel_id}")
 
-            if st.button("Get Answer") and question.strip():
+            question = st.text_area("Ask a question about the slides/pages", key=f"chat_question_{sel_id}")
+
+            if st.button("Get Answer", key=f"get_answer_{sel_id}") and question and question.strip():
                 top_ctx = []
                 try:
-                    if context_mode == "Indexed search":
+                    if context_mode == "Indexed search (best)":
                         idx = upload.get("index")
                         if idx and upload.get("chunks"):
-                            if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]):
-                                model = load_sentence_transformer()
-                                q_emb = embed_texts(model, [question])
-                                D, I = idx.search(q_emb, globals().get("TOP_K", TOP_K))
-                                for j in (I[0] if len(I) > 0 else []):
-                                    if isinstance(j, int) and 0 <= j < len(upload.get("chunks", [])):
-                                        slide_num = upload["mapping"][j]["slide"] if j < len(upload["mapping"]) else None
-                                        prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
-                                        top_ctx.append(prefix + upload["chunks"][j])
-                        # if no index results, fall back to whole doc
+                            try:
+                                model = load_sentence_transformer() if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]) else None
+                                q_emb = embed_texts(model, [question]) if model is not None else None
+                                if q_emb is not None:
+                                    D, I = idx.search(q_emb, int(st.session_state.get("TOP_K", TOP_K)))
+                                    for j in (I[0] if len(I) > 0 else []):
+                                        if isinstance(j, int) and 0 <= j < len(upload.get("chunks", [])):
+                                            slide_num = upload.get("mapping", [{}])[j].get("slide") if j < len(upload.get("mapping", [])) else None
+                                            prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
+                                            top_ctx.append(prefix + upload["chunks"][j])
+                            except Exception as e:
+                                log("Index search step failed:", e)
                         if not top_ctx:
+                            # fallback to whole document when index unavailable or returned nothing
+                            st.warning("Index unavailable or returned no results — using whole-document context as fallback.")
                             top_ctx = ["\n\n".join([s.get("text", "") for s in slides])]
+
                     elif context_mode == "Whole document":
                         top_ctx = ["\n\n".join([s.get("text", "") for s in slides])]
+
                     elif context_mode == "Specific slide":
                         top_ctx = [next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide)), "")]
                 except Exception as e:
                     log("Q&A indexing step failed:", e)
                     top_ctx = ["\n\n".join([s.get("text", "") for s in slides])]
 
-                top_ctx_text = "\n\n".join(top_ctx)
+                top_ctx_text = "\n\n".join([c for c in top_ctx if c])
                 system = "You are a helpful tutor. Use the provided context to answer concisely; cite slide/page indices if possible."
                 prompt = f"CONTEXT:\n{top_ctx_text}\n\nQUESTION:\n{question}\n\nAnswer concisely and provide one short example or analogy."
                 with st.spinner("Querying LLM..."):
@@ -1595,7 +1896,7 @@ elif active_tab == "Chat Q&A":
                 if top_ctx:
                     st.markdown("---")
                     st.markdown("**Context used (excerpt):**")
-                    for j, s in enumerate(top_ctx[: globals().get("TOP_K", TOP_K) ]):
+                    for j, s in enumerate(top_ctx[: int(st.session_state.get("TOP_K", TOP_K)) ]):
                         st.code(s[:800] + ("..." if len(s) > 800 else ""))
 
 # --------------------------
@@ -1609,47 +1910,56 @@ elif active_tab == "Quizzes":
     else:
         options = {u["id"]: u["filename"] for u in uploads}
         sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_quizzes")
-        upload = next((u for u in uploads if u["id"] == sel_id), None)
-        if upload:
+        upload_idx = next((i for i, u in enumerate(uploads) if u["id"] == sel_id), None)
+        upload = uploads[upload_idx] if upload_idx is not None else None
+
+        if not upload:
+            st.warning("Selected upload not found.")
+        else:
             slides = upload.get("slides", []) or []
-            max_idx = max([int(s["index"]) for s in slides]) if slides else 0
-            slide_idx = st.number_input("Slide/Page index to generate quiz from (or leave 0 for whole doc)", min_value=0, max_value=max_idx, value=0)
-            # choose whether to use whole doc or specific slide
-            mode = st.radio("Context mode", ["Slide (selected)", "Whole document"], index=1)
+            max_idx = max([int(s.get("index", 0)) for s in slides]) if slides else 0
+            slide_idx = st.number_input("Slide/Page index to generate quiz from (or 0 for whole doc)", min_value=0, max_value=max_idx, value=0, key=f"quiz_slide_idx_{sel_id}")
+
+            mode = st.radio("Context mode", ["Slide (selected)", "Whole document"], index=1, key=f"quiz_mode_{sel_id}")
             if mode == "Slide (selected)":
                 context_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(slide_idx)), "")
             else:
                 context_text = "\n\n".join([s.get("text", "") for s in slides])
 
-            if st.button("Generate Quiz (MCQs)"):
+            if st.button("Generate Quiz (MCQs)", key=f"gen_quiz_{sel_id}"):
                 with st.spinner("Creating MCQs..."):
                     qset = _safe_call("generate_mcq_set_from_text", context_text, qcount=5, default=[])
-                st.success("Quiz ready — try it below")
-                for qi, q in enumerate(qset):
-                    st.markdown(f"**Q{qi + 1}.** {q.get('question', '')}")
-                    opts = q.get("options", [])
-                    if not isinstance(opts, list) or len(opts) == 0:
-                        opts = ["A", "B", "C", "D"]
-                    choice = st.radio(f"Select Q{qi + 1}", opts, key=f"quiz_{sel_id}_{slide_idx}_{qi}")
-                    if st.button(f"Submit Q{qi + 1}", key=f"submit_{sel_id}_{slide_idx}_{qi}"):
-                        chosen_idx = opts.index(choice) if choice in opts else 0
-                        correct_idx = int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0)
-                        if chosen_idx == correct_idx:
-                            st.success("Correct")
-                        else:
-                            correct_text = opts[correct_idx] if 0 <= correct_idx < len(opts) else "Unknown"
-                            st.error(f"Incorrect — correct answer: {correct_text}")
-                # persist quizzes
-                cur = _get_db_cursor()
-                if cur:
-                    try:
-                        db_uid = upload_db_id(upload)
-                        for q in qset:
-                            cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                        (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0), int(time.time())))
-                        _db_conn.commit()
-                    except Exception as e:
-                        st.warning(f"Could not save quiz to DB: {e}")
+                if not qset:
+                    st.warning("Quiz generation helper not available or returned no questions.")
+                else:
+                    st.success("Quiz ready — try it below")
+                    for qi, q in enumerate(qset):
+                        st.markdown(f"**Q{qi + 1}.** {q.get('question', '')}")
+                        opts = q.get("options", [])
+                        if not isinstance(opts, list) or not opts:
+                            opts = ["A", "B", "C", "D"]
+                        choice = st.radio(f"Select Q{qi + 1}", opts, key=f"quiz_{sel_id}_{slide_idx}_{qi}")
+                        if st.button(f"Submit Q{qi + 1}", key=f"submit_{sel_id}_{slide_idx}_{qi}"):
+                            chosen_idx = opts.index(choice) if choice in opts else 0
+                            correct_idx = int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0)
+                            if chosen_idx == correct_idx:
+                                st.success("Correct")
+                            else:
+                                correct_text = opts[correct_idx] if 0 <= correct_idx < len(opts) else "Unknown"
+                                st.error(f"Incorrect — correct answer: {correct_text}")
+
+                    # try to persist quizzes
+                    cur = _get_db_cursor()
+                    if cur:
+                        try:
+                            db_uid = upload_db_id(upload)
+                            for q in qset:
+                                cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                                            (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0), int(time.time())))
+                            _db_conn.commit()
+                            st.success("Saved generated quiz to DB (if DB available).")
+                        except Exception as e:
+                            st.warning(f"Could not save quiz to DB: {e}")
 
 # --------------------------
 # Flashcards
@@ -1662,12 +1972,14 @@ elif active_tab == "Flashcards":
     else:
         options = {u["id"]: u["filename"] for u in uploads}
         sel_id = st.selectbox("Select upload to work with", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_flashcards")
-        upload = next((u for u in uploads if u["id"] == sel_id), None)
+        upload_idx = next((i for i, u in enumerate(uploads) if u["id"] == sel_id), None)
+        upload = uploads[upload_idx] if upload_idx is not None else None
+
         if not upload:
             st.warning("Selected upload not found.")
         else:
             slides = upload.get("slides", []) or []
-            max_idx = max([int(s["index"]) for s in slides]) if slides else 0
+            max_idx = max([int(s.get("index", 0)) for s in slides]) if slides else 0
             slide_idx = st.number_input("Slide/Page index to extract flashcards from", min_value=0, max_value=max_idx, value=0, key=f"flash_idx_{sel_id}")
             text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(slide_idx)), "")
 
@@ -1728,17 +2040,17 @@ elif active_tab == "Flashcards":
                     log("Failed to fetch due cards:", e)
                     due_cards = []
 
-            # If no due cards, show message
             if not due_cards:
-                st.info("No cards due for this upload. Generate some flashcards or wait for scheduled review.")
+                st.info("No cards due for this upload. Generate some or wait for scheduled review.")
             else:
-                # Practice UI: show one card at a time (store index in session)
-                st.session_state.setdefault(f"practice_idx_{sel_id}", 0)
-                pidx = st.session_state[f"practice_idx_{sel_id}"]
+                # track practice index in session state
+                practice_key = f"practice_idx_{sel_id}"
+                st.session_state.setdefault(practice_key, 0)
+                pidx = st.session_state[practice_key]
                 pidx = max(0, min(pidx, max(0, len(due_cards) - 1)))
-                st.session_state[f"practice_idx_{sel_id}"] = pidx
+                st.session_state[practice_key] = pidx
 
-                # normalize row extraction
+                # normalize row -> card
                 def _row_to_card(row):
                     try:
                         fid, qtext, atext, eas, inter, reps, nxt = row
@@ -1755,7 +2067,8 @@ elif active_tab == "Flashcards":
                 card = _row_to_card(due_cards[pidx])
                 st.markdown(f"**Card {pidx + 1} of {len(due_cards)}**")
                 st.write(card["q"])
-                if st.button("Show Answer", key=f"show_answer_{card['id']}"):
+                show_key = f"show_answer_{card['id']}"
+                if st.button("Show Answer", key=show_key):
                     st.write(card["a"])
 
                 rating = st.radio("How well did you recall?", options=[0, 1, 2, 3, 4, 5], index=3, key=f"rating_{card['id']}")
@@ -1765,8 +2078,8 @@ elif active_tab == "Flashcards":
                         cur.execute("UPDATE flashcards SET easiness = ?, interval = ?, repetitions = ?, next_review = ? WHERE id = ?", (eas_new, interval_new, reps_new, next_review, card["id"]))
                         _db_conn.commit()
                         st.success("Card updated; next review scheduled.")
-                        # advance to next card
-                        st.session_state[f"practice_idx_{sel_id}"] = min(pidx + 1, len(due_cards) - 1)
+                        # advance index
+                        st.session_state[practice_key] = min(pidx + 1, len(due_cards) - 1)
                     except Exception as e:
                         st.error(f"Failed to update card: {e}")
 
@@ -1800,9 +2113,7 @@ elif active_tab == "Export":
             st.markdown("---")
             if globals().get("_HAS_GTTS"):
                 if st.button("Export all generated lessons as MP3 (single)", key=f"export_mp3_{sel_id}"):
-                    lesson_text = ""
-                    for s in upload.get("slides", [])[:200]:
-                        lesson_text += f"Slide {s['index']}. {s.get('text','')}\n\n"
+                    lesson_text = "\n\n".join([f"Slide {s.get('index')}. {s.get('text','')}" for s in upload.get("slides", [])[:200]])
                     try:
                         res = _safe_call("text_to_speech_download", lesson_text, default=None)
                         if res:
@@ -1857,6 +2168,8 @@ elif active_tab == "Progress":
             except Exception:
                 meta_obj = {}
             st.write(meta_obj)
+
+            # counts
             c2 = _get_db_cursor()
             if c2:
                 try:
@@ -1902,7 +2215,7 @@ elif active_tab == "Settings":
         st.session_state["OPENROUTER_API_KEY"] = (key.strip() or st.session_state.get("OPENROUTER_API_KEY", ""))
         st.success("API key set for this session.")
 
-    # Add a few useful settings
+    # Model & Index settings
     st.markdown("Model & Index settings")
     st.session_state.setdefault("EMBEDDING_MODEL_NAME", globals().get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2"))
     st.session_state.setdefault("TOP_K", globals().get("TOP_K", 5))
