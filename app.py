@@ -154,6 +154,17 @@ def init_db(path: str = DB_PATH):
     return conn
 
 _db_conn = init_db()
+def upload_db_id(upload: Dict) -> int:
+    """
+    Return the DB uploads.id for this in-memory upload object.
+    If the upload has a 'db_id' (set after insertion) return it,
+    otherwise fall back to the in-memory 'id' value (timestamp).
+    """
+    try:
+        return int(upload.get("db_id") or upload.get("id"))
+    except Exception:
+        return int(upload.get("id"))
+
 
 # ------------------------------
 # Embedding Index (improvements)
@@ -267,7 +278,6 @@ def extract_from_pptx_bytes(file_bytes: bytes) -> List[Dict]:
         log("pptx parse error:", e)
         return [{"index": 0, "text": f"[pptx parse error] {e}", "images": []}]
 
-
 def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
     slides = []
     if not _HAS_PYMUPDF:
@@ -278,14 +288,31 @@ def extract_from_pdf_bytes(file_bytes: bytes) -> List[Dict]:
             page = doc.load_page(i)
             text = page.get_text("text").strip()
             images = []
+            # try extracting embedded images
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
                     base_image = doc.extract_image(xref)
-                    image_bytes = base_image["image"]
-                    images.append(image_bytes)
+                    image_bytes = base_image.get("image")
+                    if image_bytes:
+                        images.append(image_bytes)
                 except Exception:
                     pass
+
+            # If page has no selectable text and no embedded images, render page to an image
+            if (not text) and (not images):
+                try:
+                    # render at a decent DPI for OCR
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))  # ~150-200 DPI
+                    try:
+                        img_bytes = pix.tobytes(output="png")
+                    except TypeError:
+                        # older pymupdf versions use different signature
+                        img_bytes = pix.tobytes()
+                    images.append(img_bytes)
+                except Exception as e:
+                    log(f"PDF page rendering failed for page {i}: {e}")
+
             slides.append({"index": i, "text": text, "images": images})
         doc.close()
         return slides
@@ -539,15 +566,16 @@ def sm2_update_card(easiness: float, interval: int, repetitions: int, quality: i
 def anki_export_csv_for_upload(upload_id: int, conn: sqlite3.Connection) -> Tuple[str, bytes]:
     c = conn.cursor()
     c.execute("SELECT question, answer FROM flashcards WHERE upload_id = ?", (upload_id,))
-    rows = c.fetchall()
+    rows = c.fetchall() or []
     lines = []
     for q, a in rows:
-        q2 = q.replace("\t", " ").replace("\n", " ")
-        a2 = a.replace("\t", " ").replace("\n", " ")
+        q2 = (q or "").replace("\t", " ").replace("\n", " ")
+        a2 = (a or "").replace("\t", " ").replace("\n", " ")
         lines.append(f"{q2}\t{a2}")
     csv_bytes = "\n".join(lines).encode("utf-8")
     fname = f"slide_tutor_upload_{upload_id}_flashcards.txt"
     return fname, csv_bytes
+
 
 
 def text_to_speech_download(text: str, lang: str = "en") -> Tuple[str, bytes]:
@@ -647,11 +675,25 @@ if nav == "Upload & Process":
             }
             with st.spinner("Creating embeddings and index..."):
                 upload_obj = build_index_for_upload(upload_obj)
+
+            # persist upload metadata in DB and capture the DB id
+            try:
+                cur = _db_conn.cursor()
+                cur.execute(
+                    "INSERT INTO uploads (filename, uploaded_at, meta) VALUES (?, ?, ?)",
+                    (fname, upload_obj["uploaded_at"], json.dumps({"n_slides": len(slides), "n_chunks": len(chunks)}))
+                )
+                _db_conn.commit()
+                db_id = cur.lastrowid
+                upload_obj["db_id"] = int(db_id)
+            except Exception as e:
+                log("Could not save upload metadata to DB:", e)
+                upload_obj["db_id"] = None
+
+            # store in session (in-memory)
             st.session_state["uploads"].append(upload_obj)
-            cur = _db_conn.cursor()
-            cur.execute("INSERT INTO uploads (filename, uploaded_at, meta) VALUES (?, ?, ?)", (fname, upload_obj["uploaded_at"], json.dumps({"n_slides": len(slides)})))
-            _db_conn.commit()
             st.success(f"Upload processed: {len(slides)} slides/pages, {len(chunks)} chunks.")
+
             st.write("Preview first 3 chunks:")
             for i, c in enumerate(chunks[:3]):
                 st.code(c[:800] + ("..." if len(c) > 800 else ""))
@@ -718,15 +760,16 @@ elif nav == "Lessons":
                     cur = _db_conn.cursor()
                     try:
                         for q in mcqs:
-                            cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                        (upload["id"], q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
+                            db_uid = upload_db_id(upload)
+                        cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                                    (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
                         inserted = 0
                         for card in fcards:
                             qtext = card.get("q") or card.get("question") or ""
                             atext = card.get("a") or card.get("answer") or ""
                             if qtext and atext:
                                 cur.execute("INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                            (upload["id"], qtext, atext, 2.5, 1, 0, int(time.time())))
+                                    (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())))
                                 inserted += 1
                         _db_conn.commit()
                         st.success(f"Saved {len(mcqs)} MCQs and {inserted} flashcards to DB (if any).")
@@ -810,10 +853,12 @@ elif nav == "Quizzes":
                             st.error(f"Incorrect — correct answer: {opts[correct_idx]}")
                 try:
                     cur = _db_conn.cursor()
+                    db_uid = upload_db_id(upload)
                     for q in qset:
                         cur.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                    (upload["id"], q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
+                                    (db_uid, q.get("question", ""), json.dumps(q.get("options", [])), int(q.get("answer_index", 0)), int(time.time())))
                     _db_conn.commit()
+
                 except Exception as e:
                     st.warning(f"Could not save quiz to DB: {e}")
 
@@ -839,21 +884,25 @@ elif nav == "Flashcards":
                 else:
                     cur = _db_conn.cursor()
                     inserted = 0
+                    db_uid = upload_db_id(upload)
                     for card in cards:
                         qtext = card.get("q") or card.get("question") or ""
                         atext = card.get("a") or card.get("answer") or ""
                         if qtext and atext:
                             cur.execute("INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                        (upload["id"], qtext, atext, 2.5, 1, 0, int(time.time())))
+                                        (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())))
                             inserted += 1
+
                     _db_conn.commit()
                     st.success(f"Inserted {inserted} flashcards into your deck.")
             st.markdown("---")
             st.subheader("Review due flashcards")
             now = int(time.time())
             cur = _db_conn.cursor()
+            db_uid = upload_db_id(upload)
             cur.execute("SELECT id, question, answer, easiness, interval, repetitions FROM flashcards WHERE upload_id = ? AND (next_review IS NULL OR next_review <= ?) ORDER BY next_review ASC",
-                        (upload["id"], now))
+                        (db_uid, now))
+
             due_cards = cur.fetchall()
             if not due_cards:
                 st.info("No cards due for this upload. Generate some or wait for scheduled review.")
@@ -883,8 +932,9 @@ elif nav == "Export":
         if upload:
             if st.button("Export flashcards to Anki (TSV)"):
                 try:
-                    fname, data = anki_export_csv_for_upload(upload["id"], _db_conn)
+                    fname, data = anki_export_csv_for_upload(upload_db_id(upload), _db_conn)
                     st.download_button("Download Anki TSV", data, file_name=fname, mime="text/tab-separated-values")
+
                 except Exception as e:
                     st.error(f"Export failed: {e}")
             if _HAS_GTTS:
