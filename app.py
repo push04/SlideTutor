@@ -757,7 +757,7 @@ with tab_lessons:
         st.info("No uploads yet. Go to Upload & Process.")
     else:
         options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
-        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k])
+        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_lessons")
         upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
         if upload is None:
             st.warning("Selected upload not found.")
@@ -839,7 +839,8 @@ with tab_chat:
         st.info("No uploads yet. Upload files first.")
     else:
         options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
-        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k])
+        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_chat")
+
         upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
         if upload:
             question = st.text_area("Ask a question about the slides/pages")
@@ -877,7 +878,8 @@ with tab_quiz:
         st.info("No uploads yet.")
     else:
         options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
-        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k])
+        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_quizzes")
+
         upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
         if upload:
             slides = upload.get("slides", [])
@@ -921,7 +923,8 @@ with tab_flash:
         st.info("No uploads yet.")
     else:
         options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
-        sel_id = st.selectbox("Select upload to work with", options=list(options.keys()), format_func=lambda k: options[k])
+        sel_id = st.selectbox("Select upload to work with", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_flashcards")
+
         upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
         if upload:
             slides = upload.get("slides", [])
