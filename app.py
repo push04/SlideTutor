@@ -1617,154 +1617,241 @@ EMBED_MODEL_NAME = st.session_state.get("EMBEDDING_MODEL_NAME", globals().get("E
 uploads = st.session_state.get("uploads", []) or []
 
 # --------------------------
-# Lessons
+# --------------------------
+# Lessons tab (robust replacement)
 # --------------------------
 if active_tab == "Lessons":
+
     st.header("Generate Multi-level Lessons")
     uploads = st.session_state.get("uploads", []) or []
+
     if not uploads:
-        st.info("No uploads yet. Go to Upload & Process.")
+        st.info("No uploads yet. Go to Upload & Process to add a PPTX / PDF.")
     else:
-        # choose upload
-        options = {u["id"]: u.get("filename", "untitled") for u in uploads}
-        sel_id = st.selectbox("Select upload", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_lessons")
+        # Pick upload
+        options = {u["id"]: u["filename"] for u in uploads}
+        sel_id = st.selectbox(
+            "Select upload",
+            options=list(options.keys()),
+            format_func=lambda k: options.get(k, str(k)),
+            key="select_upload_lessons",
+        )
         upload = next((u for u in uploads if u["id"] == sel_id), None)
         if upload is None:
-            st.warning("Selected upload not found.")
+            st.warning("Selected upload not found in session. Try re-uploading.")
         else:
-            st.markdown("**Context source for lesson generation**")
-            context_mode = st.radio("", ["Indexed search (recommended)", "Whole document", "Specific slide"], index=0, key="lessons_context_mode")
-
             slides = upload.get("slides", []) or []
+            n_slides = len(slides)
             max_idx = max([int(s.get("index", 0)) for s in slides]) if slides else 0
 
-            seed_slide_idx = None
-            if context_mode == "Specific slide":
-                seed_slide_idx = st.number_input("Slide/Page index to focus on", min_value=0, max_value=max_idx, value=0, key="lessons_slide_index")
-                slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
-            elif context_mode == "Whole document":
-                # join all slide texts
-                slide_text = "\n\n".join([s.get("text", "") for s in slides])
-            else:  # Indexed search
-                # allow optional seed slide
-                seed_with_slide = st.checkbox("Seed with a slide for relevance (optional)", value=False, key="lessons_seed_with_slide")
-                if seed_with_slide:
-                    seed_slide_idx = st.number_input("Seed slide index", min_value=0, max_value=max_idx, value=0, key="lessons_seed_slide_idx")
-                    slide_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
-                else:
-                    # default seed -> whole document text
-                    slide_text = "\n\n".join([s.get("text", "") for s in slides])
+            # Context selection: gives the user explicit choice and avoids hard blocking when index absent
+            st.markdown("**Context source for lesson generation**")
+            context_mode = st.radio(
+                "Choose source of context",
+                ["Indexed search (preferred)", "Whole document (all slides)", "Specific slide only"],
+                index=0,
+                key="lessons_context_mode",
+            )
 
+            seed_slide_idx = 0
+            if context_mode == "Specific slide only":
+                seed_slide_idx = st.number_input(
+                    "Slide/Page index to focus on",
+                    min_value=0,
+                    max_value=max_idx,
+                    value=0,
+                    format="%d",
+                    key="lessons_specific_slide_idx",
+                )
+                seed_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
+            else:
+                # allow optional "seed slide" even when using Indexed search or Whole doc
+                seed_with_slide = st.checkbox("Seed with a specific slide's text (optional)", value=False)
+                if seed_with_slide:
+                    seed_slide_idx = st.number_input(
+                        "Seed slide index",
+                        min_value=0,
+                        max_value=max_idx,
+                        value=0,
+                        format="%d",
+                        key="lessons_seed_slide_idx",
+                    )
+                    seed_text = next((s.get("text", "") for s in slides if int(s.get("index", 0)) == int(seed_slide_idx)), "")
+                else:
+                    seed_text = ""
+
+            # Preview seed / doc choice
             st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.subheader("Seed / preview text")
-            st.write(slide_text if len(slide_text) < 4000 else slide_text[:4000] + "...")
+            st.subheader("Preview (seed text or document excerpt used for generation)")
+            if context_mode == "Whole document":
+                preview_text = "\n\n".join([s.get("text", "") for s in slides])
+                preview_text = preview_text[:4000] + ("..." if len(preview_text) > 4000 else "")
+                st.write(preview_text)
+            else:
+                st.write(seed_text if seed_text else (slides[0].get("text", "") if slides else "[no text]"))
             st.markdown("</div>", unsafe_allow_html=True)
 
+            # Option to preview ALL slides (images + text). Shows all pages by default if user wants it.
+            with st.expander(f"Preview all slides ({n_slides}) — expand to show full pages (images & text)"):
+                if n_slides == 0:
+                    st.info("No slides/pages extracted.")
+                else:
+                    # Warn for huge decks
+                    if n_slides > 200:
+                        st.warning("Large slide deck — previewing first 200 slides only for performance.")
+                    limit = min(n_slides, 200)
+                    for s in slides[:limit]:
+                        i = int(s.get("index", 0))
+                        st.markdown(f"### Slide {i + 1}")
+                        txt = s.get("text", "") or ""
+                        if txt:
+                            st.write(txt if len(txt) < 5000 else txt[:5000] + " ...")
+                        imgs = s.get("images") or []
+                        # Show every image in the slide, using new parameter use_container_width
+                        for im_idx, im_bytes in enumerate(imgs):
+                            if not im_bytes:
+                                continue
+                            try:
+                                # Display via PIL then st.image using new param
+                                from PIL import Image as PILImage
+                                pil = PILImage.open(io.BytesIO(im_bytes)).convert("RGB")
+                                # scale big images down (client-side) but keep aspect ratio
+                                max_w = 1600
+                                w, h = pil.size
+                                if w > max_w:
+                                    pil.thumbnail((max_w, int(h * max_w / w)))
+                                st.image(pil, caption=f"Slide {i+1} — image {im_idx+1}", use_container_width=True)
+                            except Exception:
+                                try:
+                                    st.image(im_bytes, caption=f"Slide {i+1} — image {im_idx+1}", use_container_width=True)
+                                except Exception:
+                                    st.write("(image not renderable)")
+                        st.markdown("---")
+
+            # generation options
             deep = st.checkbox("Produce a deeply detailed lesson (longer, step-by-step)", value=False, key="lessons_deep")
-            auto_create = st.checkbox("Also auto-create quiz + flashcards and save to DB", value=True, key="lessons_autocreate")
+            auto_create = st.checkbox("Also auto-create quiz + flashcards and save to DB", value=True, key="lessons_auto_create")
 
             if st.button("Generate Lesson (Beginner → Advanced)", key="generate_lesson_btn"):
-                # Build context snippets depending on mode and index availability
-                snippets = []
-                try:
-                    if context_mode == "Indexed search (recommended)":
-                        idx = upload.get("index")
-                        if idx and upload.get("chunks"):
-                            # compute embedding for seed text
-                            try:
-                                if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]):
-                                    model = load_sentence_transformer(st.session_state.get("EMBEDDING_MODEL_NAME", EMBED_MODEL_NAME))
-                                    q_emb = embed_texts(model, [slide_text])
-                                    D, I = idx.search(q_emb, int(st.session_state.get("TOP_K", TOP_K)))
-                                    for j in (I[0] if len(I) > 0 else []):
-                                        if isinstance(j, int) and 0 <= j < len(upload.get("chunks", [])):
-                                            slide_num = upload.get("mapping", [{}])[j].get("slide") if j < len(upload.get("mapping", [])) else None
-                                            prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
-                                            snippets.append(prefix + upload["chunks"][j])
-                            except Exception as e:
-                                log("Indexed search failed (embedding/index):", e)
-                        # fallback to whole doc if snippets empty (this allows AI even without index)
-                        if not snippets:
-                            snippets = [ "\n\n".join([s.get("text", "") for s in slides]) ]
-                    elif context_mode == "Whole document":
+                st.session_state.setdefault("EMBEDDING_MODEL_NAME", globals().get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2"))
+                st.session_state.setdefault("TOP_K", globals().get("TOP_K", 5))
+                top_k = int(st.session_state.get("TOP_K", TOP_K))
+
+                # Build context snippets depending on mode. This code ALWAYS produces a context (falls back to whole document).
+                snippets: List[str] = []
+
+                if context_mode == "Indexed search (preferred)":
+                    idx = upload.get("index")
+                    chunks = upload.get("chunks") or []
+                    # If seed_text empty and chunks exist, we use first chunk as seed_text for relevance search
+                    seed_for_query = seed_text or (chunks[0] if chunks else "")
+                    if idx and chunks and seed_for_query:
+                        try:
+                            # attempt to load or reuse embedding model
+                            if "load_sentence_transformer" in globals() and callable(globals()["load_sentence_transformer"]):
+                                model = load_sentence_transformer(st.session_state.get("EMBEDDING_MODEL_NAME"))
+                                q_emb = embed_texts(model, [seed_for_query])
+                                D, I = idx.search(q_emb, top_k)
+                                # I may contain -1 placeholders; guard indices
+                                ids = list(I[0]) if len(I) > 0 else []
+                                for j in ids:
+                                    if isinstance(j, int) and 0 <= j < len(chunks):
+                                        slide_num = upload.get("mapping", [{}])[j].get("slide") if j < len(upload.get("mapping", [])) else None
+                                        prefix = f"[Slide {slide_num}] " if slide_num is not None else ""
+                                        snippets.append(prefix + chunks[j])
+                        except Exception as e:
+                            logger.warning("Index search failed: %s", e)
+                    # If index missing or search found nothing, fall back to whole document
+                    if not snippets:
+                        logger.info("Indexed search returned no results or index unavailable — falling back to whole-document context.")
                         snippets = ["\n\n".join([s.get("text", "") for s in slides])]
-                    else:  # Specific slide
-                        snippets = [slide_text]
-                except Exception as e:
-                    log("Building context snippets failed:", e)
+                elif context_mode == "Whole document (all slides)":
                     snippets = ["\n\n".join([s.get("text", "") for s in slides])]
+                elif context_mode == "Specific slide only":
+                    snippets = [seed_text]
 
-                related = "\n\n".join(snippets)
+                related_context = "\n\n".join([sn for sn in snippets if sn])
 
-                # Call LLM via safe wrapper
-                with st.spinner("Generating lesson..."):
+                # If related_context ends up empty, provide a helpful fallback and continue
+                if not related_context.strip():
+                    related_context = "\n\n".join([s.get("text", "") for s in slides])  # best-effort fallback
+                    if not related_context.strip():
+                        related_context = "[No text extracted from this document]"
+
+                # Call LLM generation (safe wrapper). Provide user feedback while generating.
+                with st.spinner("Generating lesson via OpenRouter / LLM — this may take a moment..."):
                     try:
                         if deep:
-                            lesson = _safe_call("generate_deep_lesson", slide_text, related, default=None)
+                            lesson = _safe_call("generate_deep_lesson", related_context, related_context, default=None)
                         else:
-                            lesson = _safe_call("generate_multilevel_lesson", slide_text, related, default=None)
-                        if lesson is None:
-                            st.warning("Lesson generation helper not available in this runtime.")
+                            lesson = _safe_call("generate_multilevel_lesson", related_context, related_context, default=None)
+                        if not lesson:
+                            st.warning("Lesson generation function not available in this runtime/environment.")
                             lesson = "[Lesson generation not available]"
                     except Exception as e:
+                        logger.exception("Lesson generation call failed: %s", e)
                         lesson = f"[Lesson generation failed: {e}]"
-                        log("Lesson generation error:", e)
 
                 st.subheader("Generated Lesson")
-                st.markdown(lesson)
+                # Use markdown to preserve structure from LLM
+                try:
+                    st.markdown(lesson)
+                except Exception:
+                    st.write(lesson)
 
-                # Auto-create artifacts
+                # Auto-create MCQs & flashcards
                 if auto_create:
-                    st.info("Auto-generating MCQs and flashcards from the generated lesson...")
+                    st.info("Attempting to auto-generate MCQs and flashcards from lesson and save to DB (if available).")
                     mcqs = _safe_call("generate_mcq_set_from_text", lesson, qcount=8, default=[])
                     fcards = _safe_call("generate_flashcards_from_text", lesson, n=12, default=[])
                     cur = _get_db_cursor()
                     if cur is None:
-                        st.warning("No DB available — generated artifacts will not be persisted.")
+                        st.warning("Database not available; generated artifacts will not be persisted.")
                     else:
                         try:
                             db_uid = upload_db_id(upload)
-                            if db_uid is None:
-                                st.warning("Unable to determine DB id for this upload — artifacts will not be saved.")
-                            else:
-                                for q in mcqs or []:
-                                    try:
-                                        opts = q.get("options", []) if isinstance(q.get("options", []), list) else []
-                                        correct_index = int(q.get("answer_index", 0) if q.get("answer_index") is not None else 0)
-                                        cur.execute(
-                                            "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                            (db_uid, q.get("question", ""), json.dumps(opts, ensure_ascii=False), correct_index, int(time.time())),
-                                        )
-                                    except Exception as ex_q:
-                                        log("Failed to insert MCQ:", ex_q)
-                                inserted = 0
-                                for card in fcards or []:
+                            # insert MCQs
+                            for q in (mcqs or []):
+                                try:
+                                    opts = q.get("options", []) if isinstance(q.get("options", []), list) else []
+                                    correct_idx = int(q.get("answer_index", 0)) if q.get("answer_index") is not None else 0
+                                    cur.execute(
+                                        "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                                        (db_uid, q.get("question", ""), json.dumps(opts), correct_idx, int(time.time())),
+                                    )
+                                except Exception as e:
+                                    logger.debug("Failed to insert MCQ: %s", e)
+                            # insert flashcards
+                            inserted = 0
+                            for card in (fcards or []):
+                                try:
                                     qtext = card.get("q") or card.get("question") or ""
                                     atext = card.get("a") or card.get("answer") or ""
                                     if qtext and atext:
-                                        try:
-                                            cur.execute(
-                                                "INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                                (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())),
-                                            )
-                                            inserted += 1
-                                        except Exception as ex_f:
-                                            log("Failed to insert flashcard:", ex_f)
-                                _db_conn.commit()
-                                st.success(f"Saved {len(mcqs or [])} MCQs and {inserted} flashcards to DB (if any).")
+                                        cur.execute(
+                                            "INSERT INTO flashcards (upload_id, question, answer, easiness, interval, repetitions, next_review) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                            (db_uid, qtext, atext, 2.5, 1, 0, int(time.time())),
+                                        )
+                                        inserted += 1
+                                except Exception as e:
+                                    logger.debug("Failed to insert flashcard: %s", e)
+                            _db_conn.commit()
+                            st.success(f"Saved {len(mcqs or [])} MCQs and {inserted} flashcards to DB (if any).")
                         except Exception as e:
-                            st.warning(f"Could not save generated artifacts: {e}")
+                            logger.warning("Could not save generated artifacts: %s", e)
 
-                # Optional TTS export using gTTS if available
-                if globals().get("_HAS_GTTS") and st.button("Export lesson as MP3 (TTS)", key="lessons_export_tts"):
-                    try:
-                        fname, mp3bytes = _safe_call("text_to_speech_download", lesson, default=(None, None))
-                        if fname and mp3bytes:
-                            st.download_button("Download lesson audio", mp3bytes, file_name=fname, mime="audio/mpeg", key=f"dl_lesson_tts")
-                        else:
-                            st.warning("TTS helper not available or returned no data.")
-                    except Exception as e:
-                        st.error(f"TTS failed: {e}")
+                # Optional: Export lesson as MP3 (TTS) — only show button if helper exists
+                if globals().get("_HAS_GTTS") and callable(globals().get("text_to_speech_download", None)):
+                    if st.button("Export lesson as MP3 (TTS)", key="lessons_export_tts"):
+                        try:
+                            fname, mp3bytes = _safe_call("text_to_speech_download", lesson, default=(None, None))
+                            if fname and mp3bytes:
+                                st.download_button("Download lesson audio", mp3bytes, file_name=fname, mime="audio/mpeg")
+                            else:
+                                st.warning("TTS helper not available or returned no data.")
+                        except Exception as e:
+                            st.error(f"TTS failed: {e}")
+
 
 # --------------------------
 # Chat Q&A
