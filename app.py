@@ -584,220 +584,412 @@ if "OPENROUTER_API_KEY" not in st.session_state:
 
 st.markdown("""
 <style>
-/* Optional: uncomment to load Inter from Google Fonts (if allowed)
-   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+/* =========================
+   ADVANCED UI/UX THEME KIT
+   - Highly configurable CSS variables
+   - Glassmorphism + layered elevation
+   - Subtle animated accents
+   - Accessibility: focus-visible & reduced-motion
+   - Streamlit-safe overrides (low-side effects)
+   ========================= */
+
+/* Uncomment to load fonts from Google (only if allowed in your environment)
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Poppins:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
 */
 
-/* =========================
-   THEME VARIABLES & RESET
-   ========================= */
+/* ---------- THEME TOKENS ---------- */
 :root{
+  /* Colors */
   --bg: #071025;
-  --card: #0E1B2A;
+  --bg-2: #06101A;
+  --card: rgba(14,27,42,0.86);
+  --glass: rgba(255,255,255,0.04);
   --muted: #9AA6B2;
   --text: #E6F0FA;
   --accent: #2AB7A9;
   --accent-2: #4D7CFE;
-  --glass: rgba(255,255,255,0.03);
+  --danger: #FF6B6B;
+  --success: #4ADE80;
 
+  /* Typography */
+  --font-sans: "Inter", "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+  --base-size: 14px;
+  --heading-multiplier: 1.15;
+  --radius: 12px;
+
+  /* Spacing */
+  --gap-xxs: 6px;
   --gap-xs: 8px;
   --gap-sm: 12px;
   --gap-md: 20px;
-  --gap-lg: 32px;
-  --radius: 12px;
+  --gap-lg: 28px;
+  --gap-xl: 44px;
 
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  --base-font: 14px;
+  /* Elevation (soft shadow tokens) */
+  --elev-1: 0 6px 18px rgba(2,6,12,0.32);
+  --elev-2: 0 12px 28px rgba(2,6,12,0.38);
+  --elev-3: 0 20px 56px rgba(2,6,12,0.48);
+
+  /* Animations */
+  --fast: 120ms;
+  --mid: 240ms;
+  --slow: 420ms;
+  --ease: cubic-bezier(.2,.9,.2,1);
+  --accent-animation-duration: 6s;
 }
 
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  :root { --accent-animation-duration: 0.001ms; }
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
 }
 
-/* Light mode fallback */
+/* Light mode fallback for users that prefer it */
 @media (prefers-color-scheme: light) {
-  :root{
+  :root {
     --bg: #F6F8FB;
-    --card: #FFFFFF;
-    --text: #0B1630;
-    --muted: #60708A;
+    --bg-2: #EEF2F8;
+    --card: rgba(255,255,255,0.96);
     --glass: rgba(11,22,48,0.03);
+    --muted: #516177;
+    --text: #071025;
   }
 }
 
-/* Scope to an optional wrapper to avoid global collisions.
-   Wrap your app content in: <div class="app-theme"> ... </div>
-   Or remove the ".app-theme" prefix to apply globally. */
-.app-theme, .app-theme * {
-  box-sizing: border-box;
-  font-family: var(--font-sans);
-  color: var(--text);
-}
+/* ---------- SCOPE WRAPPER ----------
+   To avoid collisions with other CSS (Streamlit internals),
+   place your app content inside:
+     st.markdown('<div class="app-theme">', unsafe_allow_html=True)
+     ... your Streamlit content ...
+     st.markdown('</div>', unsafe_allow_html=True)
 
-/* Page background */
+   If you prefer global application, remove the `.app-theme` prefix from selectors.
+------------------------------------- */
+.app-theme, .app-theme * { box-sizing: border-box; font-family: var(--font-sans); color: var(--text); }
+
+/* Page background + base */
 .app-theme body, .app-theme .stApp {
-  background: var(--bg);
+  background: linear-gradient(180deg, var(--bg), var(--bg-2)) fixed;
   margin: 0;
   padding: 0;
-  font-size: var(--base-font);
+  font-size: var(--base-size);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
 }
 
-/* Utilities */
+/* Animated ambient gradient (subtle, behind everything) */
+.app-theme::before{
+  content: "";
+  position: fixed;
+  inset: -20% -10% auto -10%;
+  height: 60vh;
+  background: radial-gradient(800px 400px at 10% 10%, rgba(77,124,254,0.12), transparent 10%),
+              radial-gradient(700px 500px at 90% 90%, rgba(42,183,169,0.08), transparent 8%);
+  pointer-events: none;
+  filter: blur(36px);
+  z-index: 0;
+  transform: translateZ(0);
+  animation: ambientShift var(--accent-animation-duration) linear infinite;
+  mix-blend-mode: soft-light;
+}
+@keyframes ambientShift {
+  0% { transform: translateX(0) translateY(0) rotate(0deg); }
+  50% { transform: translateX(20px) translateY(-12px) rotate(0.3deg); }
+  100% { transform: translateX(0) translateY(0) rotate(0deg); }
+}
+
+/* ---------- LAYOUT HELPERS ---------- */
+.app-theme .container { position: relative; z-index: 2; padding: var(--gap-md); }
 .app-theme .row { display:flex; gap:var(--gap-md); align-items:center; }
 .app-theme .col { display:block; }
-.app-theme .muted { color:var(--muted); font-size:0.92rem; }
-.app-theme .visually-hidden { position:absolute !important; height:1px; width:1px; overflow:hidden; clip:rect(1px,1px,1px,1px); white-space:nowrap; border:0; padding:0; margin:-1px; }
+.app-theme .stack { display:flex; flex-direction:column; gap:var(--gap-sm); }
 
-/* Top bar / brand */
+/* Visually-hidden helper for accessibility */
+.app-theme .visually-hidden {
+  position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+
+/* ---------- TOPBAR / BRAND ---------- */
 .app-theme .topbar {
   display:flex;
-  align-items:center;
   justify-content:space-between;
-  gap:var(--gap-sm);
-  padding:16px 20px;
-}
-.app-theme .brand {
-  display:flex;
-  gap:12px;
   align-items:center;
+  gap:var(--gap-sm);
+  padding:14px 18px;
+  position: relative;
+  z-index: 3;
 }
+.app-theme .brand { display:flex; gap:12px; align-items:center; }
 .app-theme .logo {
   width:48px; height:48px;
-  border-radius:10px;
-  background: linear-gradient(135deg,var(--accent-2),var(--accent));
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:700;
-  color:white;
-  box-shadow: 0 8px 22px rgba(0,0,0,0.55);
-  flex-shrink:0;
+  border-radius: 12px;
+  display:flex; align-items:center; justify-content:center; font-weight:700; color:white;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  box-shadow: var(--elev-2);
+  transform-origin: center;
+  transition: transform var(--fast) var(--ease);
 }
-.app-theme .brand .title {
-  font-size:1.25rem;
-  font-weight:700;
-  margin:0;
-  line-height:1;
-}
-.app-theme .brand .subtitle { font-size:0.88rem; color:var(--muted); margin-top:2px; }
+.app-theme .logo:active { transform: scale(.98) rotate(-1deg); }
+.app-theme .brand .title { font-weight:700; font-size: calc(var(--base-size) * 1.35); line-height:1; }
+.app-theme .brand .subtitle { color: var(--muted); font-size: calc(var(--base-size) * 0.92); margin-top: 2px; }
 
-/* Tabs / nav */
+/* ---------- NAV / TABS ---------- */
 .app-theme .tabs { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .app-theme .tab {
   padding:8px 12px;
-  border-radius:9px;
-  background:transparent;
-  color:var(--muted);
-  border:1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
   font-weight:600;
-  cursor:pointer;
-  transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+  cursor: pointer;
+  transform-origin: center;
+  transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease), background var(--fast) var(--ease);
 }
-.app-theme .tab:hover { transform: translateY(-2px); }
+.app-theme .tab:hover { transform: translateY(-3px); box-shadow: var(--elev-1); }
 .app-theme .tab.active {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  color:var(--text);
-  border-color: rgba(255,255,255,0.03);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.45);
+  background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.01));
+  color: var(--text);
+  border-color: rgba(255,255,255,0.035);
+  box-shadow: var(--elev-2);
 }
 
-/* Cards & hero */
+/* ---------- CARD SYSTEM (GLASS + LAYERS) ---------- */
 .app-theme .card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
-  padding:18px;
+  position: relative;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   border-radius: var(--radius);
+  padding: 18px;
   border: 1px solid var(--glass);
-  box-shadow: 0 8px 28px rgba(2,6,12,0.5);
-  transition: transform .15s ease, box-shadow .15s ease;
+  box-shadow: var(--elev-1);
+  overflow: hidden;
+  transform: translateZ(0);
+  transition: transform var(--mid) var(--ease), box-shadow var(--mid) var(--ease);
 }
-.app-theme .card:hover { transform: translateY(-4px); box-shadow: 0 18px 40px rgba(2,6,12,0.55); }
-.app-theme .hero { padding:22px; border-radius: var(--radius); }
+.app-theme .card:hover { transform: translateY(-6px); box-shadow: var(--elev-3); }
 
-/* Buttons — consistent primary style */
-.app-theme .btn {
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  padding:10px 16px;
-  border-radius: 12px;
-  font-weight:700;
-  cursor:pointer;
-  border: none;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
-  color: #fff;
-  box-shadow: 0 10px 26px rgba(0,0,0,0.45);
-  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+/* Glass blur accent (backdrop-filter if supported) */
+.app-theme .card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,0.015), transparent 30%);
+  mix-blend-mode: overlay;
+  opacity: 0.9;
 }
+@supports ((-webkit-backdrop-filter: blur(6px)) or (backdrop-filter: blur(6px))) {
+  .app-theme .card { background: rgba(255,255,255,0.02); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+}
+
+/* Subtle floating highlight along top edge */
+.app-theme .card .edge-highlight {
+  position:absolute; left:0; right:0; top:0; height:3px;
+  background: linear-gradient(90deg, transparent, rgba(77,124,254,0.16), rgba(42,183,169,0.12), transparent);
+  opacity: 0.9;
+  transform-origin: left center;
+  animation: edgeSweep 3.2s linear infinite;
+}
+@keyframes edgeSweep {
+  0% { transform: translateX(-105%); opacity: 0; }
+  10% { opacity: 1; }
+  50% { transform: translateX(0%); opacity: 1; }
+  90% { opacity: 0; }
+  100% { transform: translateX(105%); opacity: 0; }
+}
+
+/* ---------- BUTTONS (PRIMARY / SECONDARY / GHOST) ---------- */
+.app-theme .btn {
+  display:inline-flex; align-items:center; gap:10px; justify-content:center;
+  padding:10px 16px; border-radius: 12px; font-weight:700; cursor:pointer; border: none;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  color: #ffffff; box-shadow: var(--elev-2);
+  transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+.app-theme .btn:hover { transform: translateY(-4px); box-shadow: var(--elev-3); }
 .app-theme .btn:active { transform: translateY(-1px); }
 .app-theme .btn.secondary {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.04);
-  box-shadow: none;
+  background: transparent; color: var(--text); border: 1px solid rgba(255,255,255,0.04); box-shadow: none;
 }
+.app-theme .btn.ghost { background: transparent; border: none; color: var(--muted); }
 
-/* Inputs & selects — roomy and consistent */
-.app-theme input[type="text"],
-.app-theme input[type="number"],
-.app-theme textarea,
-.app-theme select {
+/* Button micro-ripple (CSS only using pseudo-element) */
+.app-theme .btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 30%);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+  pointer-events: none;
+}
+.app-theme .btn:hover::after { opacity: 1; }
+
+/* ---------- FORMS / INPUTS ---------- */
+.app-theme input[type="text"], .app-theme input[type="number"], .app-theme textarea, .app-theme select {
   width:100%;
-  padding:10px 12px;
+  padding: 12px 14px;
   border-radius: 10px;
+  font-size: 0.95rem;
+  color: var(--text);
   background: rgba(255,255,255,0.01);
   border: 1px solid rgba(255,255,255,0.02);
-  color: var(--text);
-  font-size: 0.95rem;
-  transition: box-shadow .12s ease, border-color .12s ease;
+  transition: box-shadow var(--fast) var(--ease), border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 .app-theme input:focus, .app-theme textarea:focus, .app-theme select:focus {
   outline: none;
-  border-color: rgba(77,124,254,0.16);
-  box-shadow: 0 6px 18px rgba(2,6,12,0.35), 0 0 0 4px rgba(77,124,254,0.06);
+  border-color: rgba(77,124,254,0.18);
+  box-shadow: 0 10px 30px rgba(2,6,12,0.3), 0 0 0 6px rgba(77,124,254,0.06);
+  transform: translateY(-1px);
 }
 
-/* Streamlit button overrides (keeps specificity low) */
-.app-theme div.stButton > button {
-  all: unset;
-  box-sizing: border-box;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  cursor:pointer;
-  padding:10px 16px;
-  border-radius:12px;
-  font-weight:700;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
-  color:#fff;
-  box-shadow: 0 10px 26px rgba(0,0,0,0.45);
-  transition: transform .12s ease, box-shadow .12s ease;
+/* Field label + helper text */
+.app-theme label { display:block; font-weight:600; margin-bottom:6px; }
+.app-theme .helper { font-size:0.88rem; color: var(--muted); }
+
+/* ---------- SKELETON / SHIMMER ---------- */
+.app-theme .skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.035) 50%, rgba(255,255,255,0.02) 100%);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+.app-theme .skeleton::after {
+  content: "";
+  position: absolute; inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.03) 50%, transparent 100%);
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  to { transform: translateX(100%); }
+}
+
+/* ---------- TOOLTIPS (CSS only) ---------- */
+.app-theme .tooltip {
+  position: relative; display:inline-block;
+}
+.app-theme .tooltip .tooltip-text {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%) translateY(6px);
+  background: rgba(6,10,20,0.92); color: var(--text); padding:8px 10px; border-radius:8px; font-size:12px;
+  white-space:nowrap; opacity:0; pointer-events:none; transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
+  box-shadow: var(--elev-1);
+  z-index: 50;
+}
+.app-theme .tooltip:hover .tooltip-text, .app-theme .tooltip:focus-within .tooltip-text {
+  opacity:1; transform: translateX(-50%) translateY(0);
+}
+
+/* ---------- PROGRESS / LOADER ---------- */
+.app-theme .progress {
+  height: 10px; border-radius: 999px; background: rgba(255,255,255,0.02); overflow: hidden;
+  box-shadow: inset 0 -2px 6px rgba(0,0,0,0.4);
+}
+.app-theme .progress > .bar {
+  height:100%; width:0%; background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width var(--mid) var(--ease);
+}
+
+/* indeterminate loader */
+.app-theme .indeterminate { position: relative; overflow:hidden; background: rgba(255,255,255,0.02); }
+.app-theme .indeterminate::after {
+  content: ""; position: absolute; inset:0; transform: translateX(-40%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.02) 30%, rgba(255,255,255,0.06) 50%, transparent 70%);
+  animation: indeterminate 1.2s linear infinite;
+}
+@keyframes indeterminate { to { transform: translateX(100%); } }
+
+/* ---------- TABLES & CODE ---------- */
+.app-theme table { width:100%; border-collapse: collapse; font-size: 0.95rem; }
+.app-theme th, .app-theme td { padding:10px 12px; border-bottom: 1px dashed rgba(255,255,255,0.03); text-align: left; }
+.app-theme pre, .app-theme code {
+  background: rgba(255,255,255,0.02); padding:10px; border-radius:8px; font-family: var(--font-mono); font-size: 0.92rem; overflow:auto;
+}
+
+/* ---------- SMALL UTILITIES ---------- */
+.app-theme .muted { color: var(--muted); font-size: 0.92rem; }
+.app-theme .small { font-size: 0.9rem; color: var(--muted); }
+.app-theme .success { color: var(--success); }
+.app-theme .danger { color: var(--danger); }
+
+/* Visual separator */
+.app-theme .divider { height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); margin: 12px 0; border-radius: 1px; }
+
+/* ---------- ACCESSIBILITY ---------- */
+/* prefer focus-visible (keyboard users) */
+.app-theme :focus { outline: none; }
+.app-theme :focus-visible {
+  box-shadow: 0 0 0 5px rgba(77,124,254,0.08), 0 12px 30px rgba(2,6,12,0.25);
+  border-radius: 8px;
+}
+
+/* High contrast mode for users who opt in */
+@media (prefers-contrast: more) {
+  :root { --glass: rgba(255,255,255,0.06); --muted: #BBD2E1; }
+  .app-theme .card { border-color: rgba(255,255,255,0.06); }
+}
+
+/* ---------- RESPONSIVE ---------- */
+@media (max-width: 900px) {
+  .app-theme .row { flex-direction: column; gap: var(--gap-sm); }
+  .app-theme .topbar { padding: 12px; }
+  .app-theme .brand .title { font-size: calc(var(--base-size) * 1.15); }
+  .app-theme .container { padding: var(--gap-sm); }
+}
+
+/* ---------- STREAMLIT OVERRIDES (non-invasive) ---------- */
+/* Keep specificity modest so future Streamlit updates break less often. */
+.app-theme div.stButton > button, .app-theme button[kind="primary"] {
+  all: unset; box-sizing: border-box; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
+  padding:10px 16px; border-radius:12px; font-weight:700;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent)); color: #fff; box-shadow: var(--elev-2);
+  transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  position: relative;
 }
 .app-theme div.stButton > button:hover { transform: translateY(-3px); }
 
-/* Small helpers */
-.app-theme .small { font-size:0.9rem; color:var(--muted); }
-.app-theme .meta { font-size:0.85rem; color:var(--muted); }
-
-/* Responsive typography */
-@media (min-width: 900px) {
-  .app-theme .brand .title { font-size:1.4rem; }
-}
-@media (max-width: 720px) {
-  .app-theme .topbar { padding:12px; gap:10px; }
-  .app-theme .brand .title { font-size:1.05rem; }
-  .app-theme .card { padding:14px; }
+/* Streamlit sidebar (best-effort) */
+.app-theme .css-1lcbmhc, .app-theme .css-1d391kg, .app-theme .css-1v3fvcr /* common streamlit container classes */ {
+  background: transparent;
 }
 
-/* Small fade-in used on cards only (subtle) */
-@keyframes fadeUp {
-  from { opacity:0; transform: translateY(6px); }
-  to { opacity:1; transform: translateY(0); }
-}
-.app-theme .card { animation: fadeUp .24s ease both; }
+/* ---------- CLEAN-UP: layer ordering ---------- */
+.app-theme * { z-index: auto; }
+.app-theme .topbar, .app-theme .card { z-index: 2; }
 
+/* ---------- SMALL ANIMATIONS ---------- */
+@keyframes floaty {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0); }
+}
+.app-theme .float { animation: floaty 6s ease-in-out infinite; }
+
+/* ---------- USAGE COMMENTS ----------
+1) Wrap your Streamlit app content:
+   st.markdown('<div class="app-theme">', unsafe_allow_html=True)
+   ... your app UI ...
+   st.markdown('</div>', unsafe_allow_html=True)
+
+2) Optional fonts: if allowed, uncomment the @import lines to use Inter + Poppins + JetBrains Mono.
+   For production, prefer hosting fonts locally or via a CSP-friendly mechanism.
+
+3) To disable animations for a specific element, add: style="animation: none; transition: none;"
+4) For modal/dialog styling or more advanced JS-driven interactions, add a small JS snippet (I can provide)
+   — but this CSS provides a robust foundation without any JS.
+
+5) If you need a dark/light toggle, the preferred approach is to toggle a class on the wrapper:
+   <div class="app-theme light"> ... </div>
+   and then apply `.app-theme.light { --bg: ...; }` overrides.
+
+6) Streamlit classnames change sometimes — if a particular override fails, inspect the page classes
+   and increase specificity for the few elements that need it (I kept specificity conservative intentionally).
+
+---------- END THEME KIT ---------- */
 </style>
 """, unsafe_allow_html=True)
 
