@@ -639,7 +639,19 @@ with st.container():
 
 # top tabs — all on homepage, no sidebar
 TAB_NAMES = ["Home", "Upload & Process", "Lessons", "Chat Q&A", "Quizzes", "Flashcards", "Export", "Progress", "Settings"]
-(tab_home, tab_upload, tab_lessons, tab_chat, tab_quiz, tab_flash, tab_export, tab_progress, tab_settings) = st.tabs(TAB_NAMES)
+# ---- Replace st.tabs with a controllable top nav so quick-action buttons can switch tabs ----
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = "Home"
+
+# Render top tab buttons (simple, accessible — you can style them with CSS above)
+tab_cols = st.columns(len(TAB_NAMES))
+for i, name in enumerate(TAB_NAMES):
+    if tab_cols[i].button(name, key=f"top_tab_{name}"):
+        st.session_state["active_tab"] = name
+
+active_tab = st.session_state["active_tab"]
+# ------------------------------------------------------------------------------------------------
+
 
 # Shared session uploads container
 if "uploads" not in st.session_state:
@@ -661,7 +673,8 @@ def build_index_for_upload(upload: Dict):
 # ------------------------------
 # Home tab
 # ------------------------------
-with tab_home:
+if active_tab == "Home":
+
     st.markdown("<div class='card hero'>", unsafe_allow_html=True)
     cols = st.columns([3, 2])
     with cols[0]:
@@ -672,46 +685,104 @@ with tab_home:
         st.markdown("<div class='small-muted'>Quick actions</div>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.button("Upload & Process")
+            if st.button("Upload & Process", key="quick_upload"):
+                st.session_state["active_tab"] = "Upload & Process"
         with c2:
-            st.button("Generate Lesson")
+            if st.button("Generate Lesson", key="quick_lesson"):
+                st.session_state["active_tab"] = "Lessons"
         with c3:
-            st.button("Practice Flashcards")
+            if st.button("Practice Flashcards", key="quick_flash"):
+                st.session_state["active_tab"] = "Flashcards"
+
     with cols[1]:
         st.markdown("<div class='card' style='padding:12px;text-align:center'>\n<h3 style='margin-top:2px'>Usage Tip</h3>\n<p class='small-muted' style='font-size:13px'>Start by uploading your file in the 'Upload & Process' tab. Then explore Lessons / Quizzes / Flashcards generated automatically.</p>\n</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------
-# Upload & Process
 # ------------------------------
-with tab_upload:
+# Upload & Process (robust replacement)
+# ------------------------------
+elif active_tab == "Upload & Process":
+
     st.header("Upload PPTX / PDF (Student Upload)")
-    uploaded_file = st.file_uploader("Choose a PPTX or PDF file", type=["pptx", "pdf"], accept_multiple_files=False)
+
+    uploaded_file = st.file_uploader("Choose a PPTX or PDF file", type=["pptx", "pdf"], accept_multiple_files=False, key="uploader_file")
     if uploaded_file is not None:
-        raw_bytes = uploaded_file.read()
-        fname = uploaded_file.name
-        st.info(f"Processing {fname} ...")
+        # read bytes safely
         try:
+            raw_bytes = uploaded_file.read()
+        except Exception as e:
+            st.error(f"Could not read uploaded file: {e}")
+            raw_bytes = b""
+
+        # basic metadata
+        fname = getattr(uploaded_file, "name", "uploaded_file")
+        try:
+            file_size = getattr(uploaded_file, "size", len(raw_bytes))
+        except Exception:
+            file_size = len(raw_bytes)
+
+        # warn on very large uploads (but still attempt)
+        MB = 1024 * 1024
+        if file_size > 100 * MB:
+            st.warning("Large file (>100MB) detected. Processing may be slow or run out of memory.")
+
+        st.info(f"Processing {fname} ...")
+
+        # wrap overall processing to avoid crashing UI
+        try:
+            # extract slides depending on type
+            slides = []
             if fname.lower().endswith(".pptx"):
-                slides = extract_from_pptx_bytes(raw_bytes)
+                if not _HAS_PPTX:
+                    st.error("python-pptx not installed; cannot parse PPTX. Install python-pptx to enable this feature.")
+                    slides = [{"index": 0, "text": "[python-pptx not installed]", "images": []}]
+                else:
+                    try:
+                        slides = extract_from_pptx_bytes(raw_bytes)
+                    except Exception as e:
+                        log("pptx extraction error:", e)
+                        slides = [{"index": 0, "text": f"[pptx parse error] {e}", "images": []}]
             elif fname.lower().endswith(".pdf"):
-                slides = extract_from_pdf_bytes(raw_bytes)
+                if not _HAS_PYMUPDF:
+                    st.error("pymupdf not installed; cannot parse PDF. Install pymupdf to enable full PDF parsing.")
+                    slides = [{"index": 0, "text": "[pymupdf not installed, can't parse PDF]", "images": []}]
+                else:
+                    try:
+                        slides = extract_from_pdf_bytes(raw_bytes)
+                    except Exception as e:
+                        log("pdf extraction error:", e)
+                        slides = [{"index": 0, "text": f"[pdf parse error] {e}", "images": []}]
             else:
                 slides = [{"index": 0, "text": "[Unsupported file type]", "images": []}]
-            for s in slides:
-                imgs = s.get("images") or []
-                if imgs:
-                    ocr_texts = ocr_image_bytes_list(imgs)
-                    appended = "\n".join([t for t in ocr_texts if t])
-                    if appended:
-                        s["text"] = (s.get("text", "") + "\n\n" + appended).strip()
+
+            # OCR any slide images (only if easyocr available; keep resilient)
+            with st.spinner("Running OCR on slide images (if any)..."):
+                for si, s in enumerate(slides):
+                    imgs = s.get("images") or []
+                    if imgs:
+                        try:
+                            ocr_texts = ocr_image_bytes_list(imgs)
+                            appended = "\n".join([t for t in ocr_texts if t])
+                            if appended:
+                                s["text"] = (s.get("text", "") + "\n\n" + appended).strip()
+                        except Exception as e:
+                            log(f"OCR failure on slide {si}:", e)
+
+            # chunk text into manageable pieces
             chunks = []
             mapping = []
             for s in slides:
-                parts = chunk_text(s.get("text", ""))
+                try:
+                    parts = chunk_text(s.get("text", ""))
+                except Exception as e:
+                    log("chunk_text failed for slide", s.get("index"), e)
+                    parts = [s.get("text", "") or ""]
                 for p in parts:
                     chunks.append(p)
                     mapping.append({"slide": s["index"], "text": p})
+
+            # build upload object; use millisecond timestamp as id (keeps compatibility)
             upload_obj = {
                 "id": int(time.time() * 1000),
                 "filename": fname,
@@ -720,38 +791,121 @@ with tab_upload:
                 "chunks": chunks,
                 "mapping": mapping
             }
-            with st.spinner("Creating embeddings and index..."):
-                upload_obj = build_index_for_upload(upload_obj)
 
-            # persist upload metadata in DB and capture the DB id
+            # attempt to build embeddings/index but fail gracefully if models missing
+            with st.spinner("Creating embeddings and index (this may take a while)..."):
+                try:
+                    upload_obj = build_index_for_upload(upload_obj)
+                except Exception as e:
+                    log("Index build failed; continuing without embeddings:", e)
+                    # ensure a fallback index exists
+                    upload_obj["embeddings"] = np.zeros((0, 1), dtype=np.float32)
+                    upload_obj["index"] = VectorIndex(upload_obj["embeddings"], upload_obj.get("chunks", []))
+
+            # persist upload metadata in DB and capture DB id (defensive)
             try:
                 cur = _db_conn.cursor()
+                meta = {"n_slides": len(slides), "n_chunks": len(chunks), "file_size": file_size}
                 cur.execute(
                     "INSERT INTO uploads (filename, uploaded_at, meta) VALUES (?, ?, ?)",
-                    (fname, upload_obj["uploaded_at"], json.dumps({"n_slides": len(slides), "n_chunks": len(chunks)}))
+                    (fname, upload_obj["uploaded_at"], json.dumps(meta))
                 )
                 _db_conn.commit()
                 db_id = cur.lastrowid
                 upload_obj["db_id"] = int(db_id)
             except Exception as e:
                 log("Could not save upload metadata to DB:", e)
+                # still keep going; mark db_id None
                 upload_obj["db_id"] = None
 
-            # store in session (in-memory)
-            st.session_state["uploads"].append(upload_obj)
+            # store in session (in-memory) but avoid duplicates (same filename & size)
+            try:
+                # remove previous identical upload (filename + size) to avoid clutter
+                existing = None
+                for u in st.session_state["uploads"]:
+                    if u.get("filename") == upload_obj["filename"] and len(u.get("slides", [])) == len(upload_obj.get("slides", [])):
+                        existing = u
+                        break
+                if existing:
+                    # replace existing
+                    st.session_state["uploads"].remove(existing)
+                st.session_state["uploads"].append(upload_obj)
+            except Exception as e:
+                log("Could not append upload to session:", e)
+                st.session_state["uploads"].append(upload_obj)
+
+            # keep the user on the Upload tab so they can preview and act
+            st.session_state["active_tab"] = "Upload & Process"
+
             st.success(f"Upload processed: {len(slides)} slides/pages, {len(chunks)} chunks.")
 
-            st.write("Preview first 3 chunks:")
-            for i, c in enumerate(chunks[:3]):
-                st.code(c[:800] + ("..." if len(c) > 800 else ""))
+            # show a compact info row and download option
+            info_cols = st.columns([3, 1])
+            with info_cols[0]:
+                st.markdown(f"**Filename:** {fname}  •  **Slides:** {len(slides)}  •  **Chunks:** {len(chunks)}")
+            with info_cols[1]:
+                try:
+                    json_bytes = json.dumps(slides, ensure_ascii=False, indent=2).encode("utf-8")
+                    st.download_button("Download extracted slides (JSON)", json_bytes, file_name=f"{fname}_extracted.json", mime="application/json", key=f"dljson_{upload_obj['id']}")
+                except Exception as e:
+                    log("Could not prepare download button:", e)
+
+            # ---------- Preview: Text chunks or Slide viewer ----------
+            # unique key uses db_id or id to avoid duplication
+            preview_key = f"view_mode_{upload_obj.get('db_id') or upload_obj.get('id')}"
+            view_mode = st.radio("Preview mode", ["Text (chunks)", "Slide Viewer"], index=0, key=preview_key)
+            if view_mode == "Text (chunks)":
+                with st.expander("Preview first 10 chunks (expand to view)"):
+                    st.write("Preview first 10 chunks:")
+                    for i, c in enumerate(chunks[:10]):
+                        st.code(c[:1200] + ("..." if len(c) > 1200 else ""))
+            else:
+                st.write("Slide viewer — first 10 slides")
+                for s in upload_obj.get("slides", [])[:10]:
+                    st.markdown(f"**Slide {s['index']}**")
+                    imgs = s.get("images") or []
+                    if imgs:
+                        # try to render each image robustly
+                        rendered = False
+                        for img_idx, img_bytes in enumerate(imgs[:2]):  # try first two images per slide
+                            if not img_bytes:
+                                continue
+                            try:
+                                # st.image accepts bytes or PIL.Image; try bytes directly first
+                                st.image(img_bytes, use_column_width=True, caption=f"Slide {s['index']} — image {img_idx}", clamp=True)
+                                rendered = True
+                                break
+                            except Exception:
+                                try:
+                                    from PIL import Image as PILImage
+                                    pil_img = PILImage.open(io.BytesIO(img_bytes))
+                                    st.image(pil_img, use_column_width=True, caption=f"Slide {s['index']} — image {img_idx}")
+                                    rendered = True
+                                    break
+                                except Exception as e:
+                                    log(f"Failed to render slide image (slide {s['index']}, img {img_idx}):", e)
+                                    rendered = False
+                        if not rendered:
+                            st.info("Could not render slide image(s); showing extracted text instead.")
+                            st.write(s.get("text", ""))
+                    else:
+                        # no image: show extracted text as fallback
+                        st.info("No image available for this slide — showing extracted text")
+                        st.write(s.get("text", ""))
+
+            # ---------------------------------------------------------
+
         except Exception as e:
-            st.error(f"Error during processing: {e}")
-            st.exception(traceback.format_exc())
+            # top-level error handling so UI doesn't crash
+            st.error(f"Unexpected error during upload processing: {e}")
+            log("Unhandled upload processing error:", e, traceback.format_exc())
+
 
 # ------------------------------
 # Lessons
 # ------------------------------
-with tab_lessons:
+elif active_tab == "Lessons":
+
     st.header("Generate Multi-level Lessons")
     if not st.session_state["uploads"]:
         st.info("No uploads yet. Go to Upload & Process.")
@@ -833,7 +987,8 @@ with tab_lessons:
 # ------------------------------
 # Chat Q&A
 # ------------------------------
-with tab_chat:
+elif active_tab == "Chat Q&A":
+
     st.header("Ask questions about your upload (Retrieval + LLM)")
     if not st.session_state["uploads"]:
         st.info("No uploads yet. Upload files first.")
@@ -872,7 +1027,8 @@ with tab_chat:
 # ------------------------------
 # Quizzes
 # ------------------------------
-with tab_quiz:
+elif active_tab == "Quizzes":
+
     st.header("Auto-generated Quizzes")
     if not st.session_state["uploads"]:
         st.info("No uploads yet.")
@@ -917,7 +1073,8 @@ with tab_quiz:
 # ------------------------------
 # Flashcards
 # ------------------------------
-with tab_flash:
+elif active_tab == "Flashcards":
+
     st.header("Flashcards & Spaced Repetition")
     if not st.session_state["uploads"]:
         st.info("No uploads yet.")
