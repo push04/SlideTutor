@@ -582,47 +582,71 @@ if "OPENROUTER_API_KEY" not in st.session_state:
     st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
 
 # modern CSS + animations
+# modern CSS — simplified professional theme, cleaner buttons
 st.markdown("""
 <style>
 :root{
-  --bg:#071022;
-  --card: rgba(255,255,255,0.03);
-  --muted:#9aa6b2;
-  --accent1: linear-gradient(135deg,#7b61ff,#3ad29f);
+  --bg: #0B1220;
+  --card: #0F1A2B;
+  --muted: #9AA6B2;
+  --accent: #2AB7A9;
+  --accent-2: #4D7CFE;
+  --glass: rgba(255,255,255,0.03);
 }
-html, body, .stApp { background: linear-gradient(180deg, rgba(8,12,20,1), rgba(3,6,12,1)); color: #dbe9f7; }
-/* Animated decorative blobs */
-.blob{ position:absolute; width:360px; height:360px; filter: blur(70px); opacity:0.18; z-index:0; transform:translate3d(0,0,0); }
-.blob.one{ background: radial-gradient(circle at 20% 30%, #7b61ff, transparent 40%); top:-60px; left:-60px; animation: floaty 9s ease-in-out infinite; }
-.blob.two{ background: radial-gradient(circle at 80% 70%, #19d3a7, transparent 40%); right:-80px; bottom:-80px; animation: floaty 12s ease-in-out infinite reverse; }
-@keyframes floaty{ 0%{transform:translateY(0) rotate(0deg);} 50%{transform:translateY(16px) rotate(6deg);} 100%{transform:translateY(0) rotate(0deg);} }
 
-/* Top nav as tabs */
-.topbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 28px; position:relative; z-index:2; }
-.brand{ display:flex; align-items:center; gap:14px; }
-.logo{ width:48px; height:48px; border-radius:10px; background: linear-gradient(135deg,#7b61ff,#3ad29f); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
-.title{ font-size:20px; font-weight:700; }
-.subtitle{ color:var(--muted); font-size:12px; margin-top:2px; }
+/* base */
+html, body, .stApp { background: var(--bg); color: #E6F0FA; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+a { color: var(--accent-2); }
 
+/* topbar / brand */
+.topbar{ display:flex; align-items:center; justify-content:space-between; padding:14px 20px; gap:12px; }
+.logo{ width:44px; height:44px; border-radius:10px; background: linear-gradient(135deg,var(--accent-2),var(--accent)); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 6px 18px rgba(0,0,0,0.6); }
+.title{ font-size:18px; font-weight:700; margin-bottom:2px; }
+.subtitle{ color:var(--muted); font-size:12px; }
+
+/* tabs row */
 .tabs-row{ display:flex; gap:8px; align-items:center; }
-.tab-btn{ padding:10px 14px; border-radius:10px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .18s ease; font-weight:600; }
-.tab-btn.active{ background:var(--card); color:#eaf6ff; border-color: rgba(255,255,255,0.04); box-shadow: 0 6px 18px rgba(6,8,12,0.7); }
-.tab-btn:hover{ transform:translateY(-3px); box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
+.tab-btn{ padding:8px 12px; border-radius:10px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .14s ease; font-weight:600; cursor:pointer; }
+.tab-btn.active{ background:var(--card); color:#E9F7FF; border-color: rgba(255,255,255,0.04); box-shadow: 0 8px 24px rgba(0,0,0,0.55); }
 
-/* card style */
-.card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:18px; border-radius:14px; border:1px solid rgba(255,255,255,0.03); }
-.hero{ padding:28px; border-radius:14px; margin-bottom:16px; }
+/* cards, hero */
+.card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); padding:16px; border-radius:12px; border:1px solid var(--glass); }
+.hero{ padding:20px; border-radius:12px; margin-bottom:14px; }
+
+/* small text */
 .small-muted{ color:var(--muted); font-size:13px; }
-.slide-box{ background:#071019; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
-.mono{ font-family: monospace; }
 
-/* style streamlit buttons a bit */
-div.stButton > button, button[kind="primary"]{ background: linear-gradient(90deg,#7b61ff,#3ad29f) !important; color: #021018 !important; font-weight:700; border:none !important; padding:10px 16px !important; border-radius:10px !important; }
+/* streamlit button override — cleaner single style */
+div.stButton > button, button[kind="primary"]{
+  background: linear-gradient(90deg,var(--accent-2), var(--accent)) !important;
+  color: #ffffff !important;
+  font-weight:700;
+  border:none !important;
+  padding:8px 14px !important;
+  border-radius:10px !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  transition: transform .14s ease, box-shadow .14s ease;
+}
+div.stButton > button:hover{ transform:translateY(-3px); box-shadow: 0 12px 30px rgba(0,0,0,0.55); }
 
-/* small responsive tweaks */
-@media (max-width: 900px){ .topbar{ flex-direction:column; align-items:flex-start; gap:8px; } .tabs-row{ flex-wrap:wrap; } }
+/* inputs & selects */
+div.stSelectbox > div, div.stTextInput > div, div.stNumberInput > div{
+  border-radius:10px !important;
+  background: rgba(255,255,255,0.01) !important;
+  border: 1px solid rgba(255,255,255,0.02) !important;
+}
+
+/* compact preview */
+.slide-box{ background:#071019; padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+
+/* responsive */
+@media (max-width: 900px){
+  .topbar{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .tabs-row{ flex-wrap:wrap; }
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # Decorative blobs (absolute positioned)
 st.markdown("<div class='blob one'></div><div class='blob two'></div>", unsafe_allow_html=True)
@@ -1071,24 +1095,29 @@ elif active_tab == "Quizzes":
                     st.warning(f"Could not save quiz to DB: {e}")
 
 # ------------------------------
+# ------------------------------
 # Flashcards
 # ------------------------------
 elif active_tab == "Flashcards":
 
     st.header("Flashcards & Spaced Repetition")
     if not st.session_state["uploads"]:
-        st.info("No uploads yet.")
+        st.info("No uploads yet. Go to Upload & Process.")
     else:
         options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
         sel_id = st.selectbox("Select upload to work with", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_flashcards")
 
         upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
-        if upload:
+        if not upload:
+            st.warning("Selected upload not found.")
+        else:
             slides = upload.get("slides", [])
             max_idx = max([s["index"] for s in slides]) if slides else 0
-            slide_idx = st.number_input("Slide/Page index to extract flashcards from", min_value=0, max_value=max_idx, value=0)
+            slide_idx = st.number_input("Slide/Page index to extract flashcards from", min_value=0, max_value=max_idx, value=0, key=f"flash_idx_{sel_id}")
             text = next((s.get("text", "") for s in slides if s["index"] == slide_idx), "")
-            if st.button("Generate Flashcards from this slide/page"):
+
+            # generate flashcards
+            if st.button("Generate Flashcards from this slide/page", key=f"gen_flash_{sel_id}_{slide_idx}"):
                 with st.spinner("Generating flashcards..."):
                     cards = generate_flashcards_from_text(text, n=12)
                 if not cards:
@@ -1108,18 +1137,152 @@ elif active_tab == "Flashcards":
                                 )
                                 inserted += 1
                         _db_conn.commit()
-
                         if inserted:
                             st.success(f"Inserted {inserted} flashcards into your deck.")
                             # preview first few inserted cards
                             st.markdown("**Preview (first 5):**")
                             for i, card in enumerate(cards[:5]):
-                                qtext = card.get("q") or card.get("question") or ""
-                                atext = card.get("a") or card.get("answer") or ""
-                                st.markdown(f"**{i+1}.** {qtext}")
-                                st.markdown(f"<div class='small-muted'>Answer: {atext}</div>", unsafe_allow_html=True)
+                                qtxt = card.get("q") or card.get("question") or ""
+                                atxt = card.get("a") or card.get("answer") or ""
+                                st.markdown(f"**{i+1}.** {qtxt}")
+                                st.markdown(f"<div class='small-muted'>Answer: {atxt}</div>", unsafe_allow_html=True)
                         else:
                             st.info("No valid Q/A pairs were found in the generated output.")
                     except Exception as e:
                         st.error(f"Failed to save flashcards: {e}")
                         log("flashcard save error:", e)
+
+            st.markdown("---")
+            st.subheader("Review due flashcards")
+            now = int(time.time())
+            cur = _db_conn.cursor()
+            db_uid = upload_db_id(upload)
+            cur.execute("SELECT id, question, answer, easiness, interval, repetitions, next_review FROM flashcards WHERE upload_id = ? AND (next_review IS NULL OR next_review <= ?) ORDER BY next_review ASC",
+                        (db_uid, now))
+            due_cards = cur.fetchall()
+            if not due_cards:
+                st.info("No cards due for this upload. Generate some or wait for scheduled review.")
+            else:
+                for row in due_cards:
+                    fid, qtext, atext, eas, inter, reps, nxt = row
+                    st.markdown(f"**Q:** {qtext}")
+                    if st.button(f"Show Answer", key=f"show_{fid}"):
+                        st.markdown(f"**A:** {atext}")
+                        rating = st.slider("How well did you recall? (0-5)", 0, 5, 3, key=f"rating_{fid}")
+                        if st.button("Submit Rating", key=f"submit_rating_{fid}"):
+                            eas_new, interval_new, reps_new, next_review = sm2_update_card(eas, inter, reps, rating)
+                            cur.execute("UPDATE flashcards SET easiness = ?, interval = ?, repetitions = ?, next_review = ? WHERE id = ?",
+                                        (eas_new, interval_new, reps_new, next_review, fid))
+                            _db_conn.commit()
+                            st.success("Card updated; next review scheduled.")
+
+# ------------------------------
+# Export
+# ------------------------------
+elif active_tab == "Export":
+
+    st.header("Export — Anki / Audio / Raw")
+    if not st.session_state["uploads"]:
+        st.info("No uploads available.")
+    else:
+        options = {u["id"]: u["filename"] for u in st.session_state["uploads"]}
+        sel_id = st.selectbox("Select upload to export from", options=list(options.keys()), format_func=lambda k: options[k], key="select_upload_export")
+        upload = next((u for u in st.session_state["uploads"] if u["id"] == sel_id), None)
+        if not upload:
+            st.warning("Selected upload not found.")
+        else:
+            st.markdown("**Flashcards / Anki**")
+            if st.button("Export flashcards to Anki (TSV)", key=f"export_anki_{sel_id}"):
+                try:
+                    fname, data = anki_export_csv_for_upload(upload_db_id(upload), _db_conn)
+                    st.download_button("Download Anki TSV", data, file_name=fname, mime="text/tab-separated-values", key=f"dl_anki_{sel_id}")
+                except Exception as e:
+                    st.error(f"Export failed: {e}")
+
+            st.markdown("---")
+            if _HAS_GTTS:
+                if st.button("Export all generated lessons as MP3 (single)", key=f"export_mp3_{sel_id}"):
+                    lesson_text = ""
+                    for s in upload.get("slides", [])[:50]:
+                        lesson_text += f"Slide {s['index']}. {s.get('text','')}\n\n"
+                    try:
+                        fname, data = text_to_speech_download(lesson_text)
+                        st.download_button("Download lessons MP3", data, file_name=fname, mime="audio/mpeg", key=f"dl_mp3_{sel_id}")
+                    except Exception as e:
+                        st.error(f"TTS failed: {e}")
+            else:
+                st.info("gTTS not available — TTS export disabled.")
+
+            st.markdown("---")
+            if st.button("Download extracted slides (JSON)", key=f"export_json_{sel_id}"):
+                try:
+                    ark = json.dumps(upload.get("slides", []), ensure_ascii=False, indent=2).encode("utf-8")
+                    st.download_button("Download JSON", ark, file_name=f"{upload['filename']}_extracted.json", mime="application/json", key=f"dl_json_{sel_id}")
+                except Exception as e:
+                    st.error(f"Could not prepare download: {e}")
+
+# ------------------------------
+# Progress
+# ------------------------------
+elif active_tab == "Progress":
+
+    st.header("Progress & Analytics")
+    st.markdown("Overview of uploads and study artifacts")
+
+    cur = _db_conn.cursor()
+    cur.execute("SELECT id, filename, uploaded_at, meta FROM uploads ORDER BY uploaded_at DESC")
+    rows = cur.fetchall()
+    if not rows:
+        st.info("No uploads logged in DB yet.")
+    else:
+        for r in rows:
+            uid, fname, uploaded_at, meta = r
+            st.markdown(f"**{fname}** — uploaded at {time.ctime(uploaded_at)}")
+            meta_obj = safe_json_loads(meta) or {}
+            st.write(meta_obj)
+            c2 = _db_conn.cursor()
+            c2.execute("SELECT COUNT(*) FROM flashcards WHERE upload_id = ?", (uid,))
+            fc_count = c2.fetchone()[0]
+            c2.execute("SELECT COUNT(*) FROM quizzes WHERE upload_id = ?", (uid,))
+            q_count = c2.fetchone()[0]
+            st.write(f"Flashcards: {fc_count} • Quizzes: {q_count}")
+            st.markdown("---")
+
+    c = _db_conn.cursor()
+    c.execute("SELECT COUNT(*) FROM flashcards")
+    total_fc = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM quizzes")
+    total_q = c.fetchone()[0]
+    st.write(f"Total flashcards in DB: {total_fc}")
+    st.write(f"Total quizzes in DB: {total_q}")
+
+# ------------------------------
+# Settings
+# ------------------------------
+elif active_tab == "Settings":
+
+    st.header("Settings & Diagnostics")
+    if "OPENROUTER_API_KEY" not in st.session_state:
+        st.session_state["OPENROUTER_API_KEY"] = os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)
+
+    key = st.text_input("OpenRouter API key (leave blank to use env/default)", value=st.session_state.get("OPENROUTER_API_KEY",""), type="password", key="api_key_input")
+    if st.button("Save API Key (session only)", key="save_api_key"):
+        st.session_state["OPENROUTER_API_KEY"] = key.strip() or st.session_state.get("OPENROUTER_API_KEY", "")
+        st.success("API key set for this session.")
+
+    st.markdown("Diagnostics:")
+    st.write({
+        "faiss_available": _HAS_FAISS,
+        "pymupdf_available": _HAS_PYMUPDF,
+        "easyocr_available": _HAS_EASYOCR,
+        "sentence_transformers_available": _HAS_SENTENCE_TRANSFORMERS,
+        "gtts_available": _HAS_GTTS
+    })
+
+    if st.button("Test OpenRouter (small ping)", key="test_openrouter"):
+        test = call_openrouter_chat("You are a test bot.", "Say 'pong' in a plain short reply.", max_tokens=20)
+        st.code(test)
+
+    if st.button("Clear all session uploads (session state only)", key="clear_uploads_btn"):
+        st.session_state["uploads"] = []
+        st.success("Cleared session uploads.")
