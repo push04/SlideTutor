@@ -1,7 +1,7 @@
 # SlideTutor — Improved version with EasyOCR (no Tesseract binary required)
 # UI/UX refreshed: single-page (no sidebar), top tabs, modern CSS, subtle animations
 # Save this file and run with: streamlit run slidetutor_improved_easyocr_ui.py
-
+from __future__ import annotations
 import os
 import io
 import sys
@@ -13,7 +13,6 @@ import tempfile
 import traceback
 import sqlite3
 from typing import List, Dict, Tuple, Optional, Any
-from __future__ import annotations
 
 
 try:
