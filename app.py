@@ -1074,15 +1074,24 @@ if active_tab == "Upload & Process":
     uploaded = st.file_uploader("Choose PPTX/PDF files", accept_multiple_files=True, type=["pdf", "pptx", "ppt"])
     if uploaded:
         for f in uploaded:
-            # avoid duplicate uploads by filename+size heuristic
-            known_names = {u["filename"] for u in st.session_state["uploads"]}
-            if f.name in known_names:
-                st.warning(f"File '{f.name}' already uploaded - skipping duplicate.")
+            # avoid duplicate uploads by filename heuristic
+            known_names = {u.get("filename") for u in st.session_state.get("uploads", [])}
+            fname = getattr(f, "name", None) or "<uploaded_file>"
+            if fname in known_names:
+                st.warning(f"File '{fname}' already uploaded - skipping duplicate.")
                 continue
-            with st.spinner(f"Processing {f.name} ..."):
+
+            with st.spinner(f"Processing {fname} ..."):
                 up = add_upload_file(f)
-                if up:
-                    st.success(f"Uploaded: {f['filename']}")
+                # add_upload_file should return a dict (upload info). Be defensive.
+                if up and isinstance(up, dict):
+                    uploaded_name = up.get("filename") or fname
+                    st.success(f"Uploaded: {uploaded_name}")
+                elif up:  # maybe a truthy non-dict (unexpected), show safe message
+                    st.success(f"Uploaded: {fname}")
+                else:
+                    st.error(f"Failed to process upload: {fname}")
+
     st.markdown("</div>", unsafe_allow_html=True)
 
     # List existing uploads with controls
