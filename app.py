@@ -585,72 +585,232 @@ if "OPENROUTER_API_KEY" not in st.session_state:
 # modern CSS — professional, roomy UI, subtle animations
 st.markdown("""
 <style>
+/* Optional: load Inter from Google Fonts (uncomment if allowed in your environment) */
+/* @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap'); */
+
+/* =========================
+   THEME VARIABLES & RESET
+   ========================= */
 :root{
+  /* core palette */
   --bg: #071025;
   --card: #0E1B2A;
   --muted: #9AA6B2;
+  --text: #E6F0FA;
   --accent: #2AB7A9;
   --accent-2: #4D7CFE;
   --glass: rgba(255,255,255,0.03);
+
+  /* spacing & sizing */
+  --gap-sm: 8px;
+  --gap-md: 16px;
+  --gap-lg: 24px;
+  --radius: 12px;
+
+  /* typography */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --base-font-size: 14px;
+  --heading-scale: 1.15;
 }
 
-/* base */
-html, body, .stApp { background: var(--bg); color: #E6F0FA; font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding:0; margin:0; }
-a { color: var(--accent-2); }
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
 
-/* topbar / brand */
-.topbar{ display:flex; align-items:center; justify-content:space-between; padding:18px 24px; gap:12px; }
-.logo{ width:48px; height:48px; border-radius:10px; background: linear-gradient(135deg,var(--accent-2),var(--accent)); display:flex; align-items:center; justify-content:center; font-weight:700; color:white; box-shadow: 0 8px 28px rgba(0,0,0,0.6); }
-.title{ font-size:20px; font-weight:700; margin-bottom:2px; }
-.subtitle{ color:var(--muted); font-size:12px; }
+/* Optional: support for light mode fallback */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #F7FAFF;
+    --card: #FFFFFF;
+    --text: #0B1630;
+    --muted: #556575;
+    --glass: rgba(11,22,48,0.03);
+  }
+}
 
-/* tabs row */
-.tabs-row{ display:flex; gap:10px; align-items:center; }
-.tab-btn{ padding:10px 14px; border-radius:12px; background:transparent; color:var(--muted); border:1px solid transparent; transition:all .16s ease; font-weight:600; cursor:pointer; }
-.tab-btn.active{ background:var(--card); color:#E9F7FF; border-color: rgba(255,255,255,0.04); box-shadow: 0 10px 30px rgba(0,0,0,0.55); }
+/* Scope everything to reduce clashes.
+   If you prefer global styling, replace `.custom-theme` with `:root` or `.stApp`. */
+.custom-theme,
+.custom-theme * {
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+  color: var(--text);
+}
 
-/* cards, hero */
-.card{ background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005)); padding:18px; border-radius:14px; border:1px solid var(--glass); box-shadow: 0 8px 28px rgba(2,6,12,0.5); animation: fadeIn .28s ease; }
-.hero{ padding:22px; border-radius:14px; margin-bottom:18px; }
+/* Base layout (applies to the stApp area) */
+.custom-theme .stApp, .custom-theme html, .custom-theme body {
+  background: var(--bg);
+  padding: 0;
+  margin: 0;
+  font-size: var(--base-font-size);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-/* subtle fade-in */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: translateY(0);} }
+/* Links */
+.custom-theme a { color: var(--accent-2); text-decoration: none; }
+.custom-theme a:hover, .custom-theme a:focus { text-decoration: underline; }
 
-/* small text */
-.small-muted{ color:var(--muted); font-size:13px; line-height:1.35; }
-
-/* streamlit button override — cleaner single style */
-div.stButton > button, button[kind="primary"]{
-  background: linear-gradient(90deg,var(--accent-2), var(--accent)) !important;
-  color: #ffffff !important;
+/* Topbar / brand */
+.custom-theme .topbar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--gap-md);
+  padding:18px 20px;
+}
+.custom-theme .logo {
+  width:48px;
+  height:48px;
+  border-radius:10px;
+  background: linear-gradient(135deg,var(--accent-2),var(--accent));
+  display:flex;
+  align-items:center;
+  justify-content:center;
   font-weight:700;
-  border:none !important;
-  padding:10px 16px !important;
-  border-radius:12px !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-  transition: transform .14s ease, box-shadow .14s ease;
+  color:white;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+  flex-shrink:0;
 }
-div.stButton > button:hover{ transform:translateY(-4px); box-shadow: 0 16px 36px rgba(0,0,0,0.55); }
+.custom-theme .title {
+  font-size: calc(var(--base-font-size) * 1.4);
+  font-weight: 700;
+  margin:0;
+  line-height:1;
+}
+.custom-theme .subtitle {
+  color: var(--muted);
+  font-size: calc(var(--base-font-size) * 0.9);
+  margin-top:4px;
+}
 
-/* inputs & selects (more airy) */
-div.stSelectbox > div, div.stTextInput > div, div.stNumberInput > div{
-  border-radius:12px !important;
+/* Tabs row */
+.custom-theme .tabs-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.custom-theme .tab-btn {
+  padding:10px 14px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  transition: all .14s ease;
+  font-weight:600;
+  cursor: pointer;
+  outline: none;
+}
+.custom-theme .tab-btn:hover { transform: translateY(-2px); }
+.custom-theme .tab-btn:focus { box-shadow: 0 0 0 3px rgba(77,124,254,0.12); }
+.custom-theme .tab-btn.active {
+  background: var(--card);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.04);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+}
+
+/* Cards & hero */
+.custom-theme .card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.005));
+  padding: 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass);
+  box-shadow: 0 8px 28px rgba(2,6,12,0.5);
+  animation: themeFadeIn .28s ease;
+}
+.custom-theme .hero { padding:22px; border-radius: var(--radius); margin-bottom: 18px; }
+
+/* Accessible focus ring for interactive elements */
+.custom-theme button:focus, .custom-theme a:focus, .custom-theme input:focus, .custom-theme select:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(42,183,169,0.10), 0 4px 18px rgba(2,6,12,0.35);
+  border-radius: 10px;
+}
+
+/* Subtle fade-in */
+@keyframes themeFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Small muted text */
+.custom-theme .small-muted { color: var(--muted); font-size: 13px; line-height: 1.35; }
+
+/* Streamlit button override — consistent primary style.
+   We intentionally keep specificity moderate so Streamlit internals still work. */
+.custom-theme div.stButton > button,
+.custom-theme button[kind="primary"] {
+  background: linear-gradient(90deg, var(--accent-2), var(--accent)) !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  border: none !important;
+  padding: 10px 16px !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  transition: transform .14s ease, box-shadow .14s ease, opacity .14s ease;
+  cursor: pointer;
+}
+.custom-theme div.stButton > button:hover { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(0,0,0,0.55); }
+.custom-theme div.stButton > button:active { transform: translateY(-1px); }
+
+/* Inputs & selects (airier, consistent padding). Keep selectors broad to cover different Streamlit versions */
+.custom-theme input[type="text"],
+.custom-theme input[type="number"],
+.custom-theme textarea,
+.custom-theme select,
+.custom-theme .stTextInput>div, 
+.custom-theme .stNumberInput>div,
+.custom-theme .stSelectbox>div {
+  border-radius: 10px !important;
   background: rgba(255,255,255,0.01) !important;
   border: 1px solid rgba(255,255,255,0.02) !important;
-  padding:8px !important;
+  padding: 8px !important;
+  color: var(--text);
 }
 
-/* slide viewer */
-.slide-box{ background:#061019; padding:14px; border-radius:10px; border:1px solid rgba(255,255,255,0.03); }
+/* Slide/thumbnail viewer */
+.custom-theme .slide-box {
+  background: #061019;
+  padding:14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.03);
+}
 
-/* thumbnail styling inside markdown imgs */
-/* refined thumbnail + control styles */
-.thumb-img{ width:100%; border-radius:8px; border:1px solid rgba(255,255,255,0.03); box-shadow: 0 6px 18px rgba(0,0,0,0.45); }
-div.stSlider > div{ padding:6px 8px !important; border-radius:8px !important; }
-div.stButton > button.small{ padding:6px 10px !important; font-size:13px !important; border-radius:8px !important; }
+/* Thumbnails */
+.custom-theme .thumb-img {
+  width:100%;
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,0.03);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  display:block;
+}
 
+/* Slider & button utility classes */
+.custom-theme .small-btn { padding:6px 10px !important; font-size:13px !important; border-radius:8px !important; }
+
+/* Responsive typography */
+@media (min-width: 900px) {
+  .custom-theme .title { font-size: calc(var(--base-font-size) * 1.6); }
+}
+@media (max-width: 720px) {
+  .custom-theme .topbar { padding: 12px; gap:10px; }
+  .custom-theme .title { font-size: calc(var(--base-font-size) * 1.25); }
+  .custom-theme .tab-btn { padding: 8px 10px; }
+}
+
+/* Utility helpers (spacing, visually-hidden for accessibility) */
+.custom-theme .mt-sm { margin-top: var(--gap-sm); }
+.custom-theme .mt-md { margin-top: var(--gap-md); }
+.custom-theme .visually-hidden {
+  position: absolute !important;
+  height: 1px; width: 1px;
+  overflow: hidden; clip: rect(1px, 1px, 1px, 1px);
+  white-space: nowrap; border: 0; padding: 0; margin: -1px;
+}
 </style>
+
+<!-- If you want styles applied globally remove the outer ".custom-theme" wrapper in the CSS above,
+     and optionally wrap your app content in: <div class="custom-theme"> ... </div> -->
 """, unsafe_allow_html=True)
+
 
 
 
