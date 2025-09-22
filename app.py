@@ -1082,247 +1082,199 @@ def answer_question_with_rag_safe(query, indexed_uploads, top_k=None):
 # UI: polished, simple, professional
 # ----------------------------
 APP_CSS = """
-/* ----------------------------------------------------------
-   SlideTutor — Professional UI theme
-   - Modern, accessible dark theme with careful spacing, focus states,
-     responsive layouts, and component utility classes.
-   - Drop this string into your app and apply via st.markdown(f"<style>{APP_CSS}</style>", unsafe_allow_html=True)
-   ---------------------------------------------------------- */
+/* SlideTutor — Clean professional dark theme
+   Paste into Streamlit with:
+   st.markdown(f"<style>{APP_CSS}</style>", unsafe_allow_html=True)
+*/
 
-/* Import a reliable variable font (Inter) for legible UI text */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
 
-:root{
-  /* Color palette (dark theme) */
-  --bg: #061227;            /* page background */
-  --bg-2: #07162b;          /* subtle panel background */
-  --card: rgba(255,255,255,0.03);
+:root {
+  --bg-0: #051022;
+  --bg-1: #061428;
+  --panel: rgba(255,255,255,0.02);
   --muted: #9AA6B2;
   --text: #E6F0FA;
-  --accent: #6C5CE7;        /* primary gradient start */
-  --accent-2: #4b2bd0;      /* primary gradient end */
-  --accent-3: #2AB7A9;      /* secondary accent (eg. success highlights) */
+  --accent-1: #6C5CE7;
+  --accent-2: #4b2bd0;
   --success: #2AB76A;
   --danger: #FF6B6B;
   --glass: rgba(255,255,255,0.025);
   --radius: 12px;
   --radius-sm: 8px;
-  --shadow-1: 0 6px 20px rgba(2,6,12,0.6);
-  --shadow-2: 0 4px 12px rgba(2,8,20,0.45);
-  --spacing: 16px;
-  --max-width: 1200px;
-  --accent-gradient: linear-gradient(90deg, var(--accent), var(--accent-2));
-  --transition-fast: 150ms ease;
-  --transition-medium: 240ms ease;
+  --shadow-soft: 0 8px 24px rgba(2,6,12,0.55);
+  --shadow-subtle: 0 6px 18px rgba(2,6,12,0.45);
+  --space: 16px;
+  --max-width: 1180px;
+  --accent-grad: linear-gradient(90deg, var(--accent-1), var(--accent-2));
 }
 
-/* Base + layout */
+/* Base document */
 html, body, .stApp {
-  height: 100%;
-  background: radial-gradient(1200px 600px at 10% 10%, rgba(92,72,172,0.08), transparent 10%),
-              linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  min-height: 100%;
+  background: radial-gradient(800px 360px at 10% 12%, rgba(76,64,156,0.06), transparent 10%),
+              linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
   color: var(--text);
   font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.45;
-  -webkit-tap-highlight-color: transparent;
 }
 
-/* Container padding tuned for a clean, airy feel */
+/* Page container */
 .block-container {
   padding: 28px 32px !important;
   max-width: var(--max-width);
-  margin: 0 auto;
+  margin-left: auto;
+  margin-right: auto;
 }
 
-/* Card styles */
+/* Card */
 .card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.008));
+  background: linear-gradient(180deg, rgba(255,255,255,0.016), rgba(255,255,255,0.008));
   border-radius: var(--radius);
-  padding: calc(var(--spacing) * 0.875);
+  padding: calc(var(--space) * 0.9);
   margin-bottom: 18px;
   border: 1px solid rgba(255,255,255,0.03);
-  box-shadow: var(--shadow-1);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: var(--shadow-soft);
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
-.card:hover { transform: translateY(-4px); box-shadow: var(--shadow-2); }
+.card:hover { transform: translateY(-4px); box-shadow: var(--shadow-subtle); }
 
-/* Card header / meta */
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.card-title { font-size: 1.05rem; font-weight: 700; color: var(--text); margin: 0; }
-.card-sub { font-size: 0.92rem; color: var(--muted); margin: 0; }
-
-/* Elegant app header (logo + title) */
-.app-header {
-  display:flex;
-  align-items:center;
-  gap:14px;
-  margin-bottom:18px;
-}
+/* Header */
+.app-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
 .app-logo {
-  width:48px; height:48px;
-  display:inline-flex; align-items:center; justify-content:center;
-  border-radius:10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-  box-shadow: 0 6px 18px rgba(11,12,30,0.5);
-  font-size:1.4rem;
+  width:48px; height:48px; border-radius:10px;
+  display:inline-grid; place-items:center; font-size:1.2rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  box-shadow: 0 6px 18px rgba(2,6,12,0.45);
 }
-.app-title { font-size:1.4rem; font-weight:700; margin:0; }
-.app-subtitle { color:var(--muted); font-size:0.95rem; margin:0; }
+.app-title { font-size:1.35rem; font-weight:700; margin:0; }
+.app-sub { color:var(--muted); margin:0; font-size:0.95rem; }
 
-/* Sidebar refinements (Streamlit's sidebar) */
+/* Sidebar tweaks */
 [data-testid="stSidebar"] {
-  background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.006));
-  border-right: 1px solid rgba(255,255,255,0.03);
-  padding-top: 20px;
-}
-[data-testid="stSidebar"] .stButton>button { width:100%; }
-
-/* Tabs / navigation */
-.css-1v3fvcr, .stTabs { /* fallback for older streamlit classes */
-  display:block;
+  background: linear-gradient(180deg, rgba(255,255,255,0.008), rgba(255,255,255,0.004));
+  border-right: 1px solid rgba(255,255,255,0.02);
+  padding-top: 18px;
 }
 
-/* File uploader / preview */
+/* Uploader & file list */
 .uploader {
   border: 1px dashed rgba(255,255,255,0.04);
   padding: 14px;
   border-radius: 10px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.01), transparent);
+  background: rgba(255,255,255,0.01);
 }
 .uploader .hint { color: var(--muted); font-size:0.95rem; }
-
-/* Compact file list rows */
 .file-row {
   display:flex; align-items:center; justify-content:space-between; gap:12px;
   padding:10px; border-radius:8px; background:var(--glass); margin-bottom:8px;
 }
-.file-meta { display:flex; align-items:center; gap:10px; }
+.file-meta { display:flex; gap:10px; align-items:center; }
 .file-name { font-weight:600; color:var(--text); }
 .file-small { color:var(--muted); font-size:0.92rem; }
 
-/* Slide preview block */
+/* Slide preview */
 .preview-slide {
   display:flex; gap:12px; align-items:flex-start;
-  background: rgba(255,255,255,0.015);
+  background: rgba(255,255,255,0.014);
   border-radius: var(--radius-sm);
   padding: 10px;
   border: 1px solid rgba(255,255,255,0.02);
 }
 .slide-thumb {
-  width: 120px; height: 80px; border-radius:8px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.92rem; overflow:hidden;
-  flex-shrink:0;
+  width:120px; height:76px; border-radius:8px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.92rem;
+  overflow:hidden; flex-shrink:0;
 }
 .slide-text { font-size:0.95rem; color:var(--text); }
 
-/* Buttons: primary / secondary / ghost */
+/* Buttons (primary) */
 .stButton>button {
   border-radius: 10px !important;
   padding: 8px 14px !important;
-  background: var(--accent-gradient) !important;
+  background: var(--accent-grad) !important;
   color: #fff !important;
   border: none !important;
   box-shadow: 0 6px 18px rgba(77,92,230,0.12);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  transition: transform 130ms ease, box-shadow 130ms ease, opacity 130ms ease;
 }
-.stButton>button:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(77,92,230,0.18); }
-.stButton>button:active { transform: translateY(0); }
-.stButton>button[disabled] { opacity: 0.6; transform:none; box-shadow:none; cursor:not-allowed; }
+.stButton>button:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(77,92,230,0.16); }
+.stButton>button[disabled] { opacity:0.6; transform:none; cursor:not-allowed; }
 
-/* Utility variants */
-.btn-secondary {
-  background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
-  color: var(--text) !important;
-  border: 1px solid rgba(255,255,255,0.04);
-  box-shadow: none !important;
-}
-.btn-ghost {
-  background: transparent !important;
-  color: var(--muted) !important;
-  border: 1px solid rgba(255,255,255,0.02) !important;
-}
+/* Secondary/ghost utilities you can apply via class names in markdown */
+.btn-secondary { background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); color: var(--text) !important; border:1px solid rgba(255,255,255,0.03); box-shadow:none !important; }
+.btn-ghost { background: transparent !important; color: var(--muted) !important; border:1px solid rgba(255,255,255,0.02) !important; }
 
-/* Badges and small labels */
-.badge {
-  display:inline-block; padding:4px 8px; font-size:0.82rem; border-radius:999px; background:rgba(255,255,255,0.02); color:var(--muted);
-}
-
-/* Muted & helper text */
-.small-muted { color: var(--muted); font-size: 0.92rem; }
-
-/* Input / textarea styling */
+/* Inputs */
 textarea, input, .stTextInput, .stTextArea {
   border-radius: 10px !important;
   border: 1px solid rgba(255,255,255,0.03) !important;
-  background: rgba(255,255,255,0.01) !important;
+  background: rgba(255,255,255,0.008) !important;
   padding: 10px !important;
   color: var(--text) !important;
-  transition: box-shadow var(--transition-fast);
+  transition: box-shadow 140ms ease;
 }
 textarea:focus, input:focus, .stTextInput:focus, .stTextArea:focus {
   outline: none !important;
   box-shadow: 0 6px 20px rgba(76,84,255,0.12);
-  border-color: rgba(108,92,231,0.22) !important;
+  border-color: rgba(108,92,231,0.18) !important;
 }
 
 /* Chat bubbles */
 .chat-container { display:flex; flex-direction:column; gap:10px; }
 .chat-message { max-width:80%; padding:12px 14px; border-radius:12px; line-height:1.4; }
-.chat-user { align-self:flex-end; background: linear-gradient(90deg,#2b2b2b, #1f2430); color:#fff; border: 1px solid rgba(255,255,255,0.02); }
-.chat-assistant { align-self:flex-start; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); color:var(--text); border:1px solid rgba(255,255,255,0.02); }
+.chat-user { align-self:flex-end; background: linear-gradient(90deg,#2b2b2b,#1f2430); color:#fff; border: 1px solid rgba(255,255,255,0.02); }
+.chat-assistant { align-self:flex-start; background: rgba(255,255,255,0.012); color:var(--text); border: 1px solid rgba(255,255,255,0.02); }
 
 /* Flashcards */
-.flashcard { background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.008)); padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); box-shadow: var(--shadow-2); }
+.flashcard { background: rgba(255,255,255,0.012); padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); box-shadow: var(--shadow-subtle); }
 .flashcard-controls { display:flex; gap:8px; margin-top:10px; }
 
-/* Progress / loaders */
+/* Progress bar */
 .progress-wrap { background: rgba(255,255,255,0.02); border-radius: 10px; padding: 6px; }
 .progress-bar { height:10px; border-radius:10px; background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); overflow:hidden; }
-.progress-bar > span { display:block; height:100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius:10px; }
+.progress-bar > span { display:block; height:100%; background: linear-gradient(90deg, var(--accent-1), var(--accent-2)); border-radius:10px; }
 
 /* Small utilities */
 .kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:3px 6px; font-weight:600; font-size:0.85rem; color:var(--muted); border:1px solid rgba(255,255,255,0.02); }
 .center { display:flex; justify-content:center; align-items:center; }
+.small-muted { color: var(--muted); font-size:0.92rem; }
 
-/* Focus-visible for accessibility */
+/* Accessibility focus-visible */
 :focus, .stButton>button:focus, .stTextInput:focus, .stTextArea:focus {
   outline: 3px solid rgba(108,92,231,0.12);
   outline-offset: 2px;
 }
 :focus:not(:focus-visible) { outline: none; }
 
-/* Low-motion for accessibility */
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
 
-/* Responsive tweaks */
+/* Responsive adjustments */
 @media (max-width: 900px) {
   .slide-thumb { width: 90px; height: 64px; }
   .block-container { padding: 18px 16px !important; }
   .app-title { font-size: 1.12rem; }
 }
 
-/* Light theme override (optional) - apply .light-theme on body */
+/* Optional light-theme override: add class "light-theme" to body via JS or app wrapper if you support a light mode */
 .light-theme {
-  --bg: #f6f7fb;
-  --bg-2: #eef2fb;
-  --card: rgba(12,18,30,0.02);
+  --bg-0: #f6f8fb;
+  --bg-1: #eef2fb;
+  --panel: rgba(12,18,30,0.02);
   --text: #071225;
   --muted: #4b5563;
-  --accent: #3366ff;
+  --accent-1: #3366ff;
   --accent-2: #4b2bd0;
-  background: linear-gradient(180deg, #f6f8fc 0%, #eef2fb 100%);
 }
 """
+APP_TITLE = "SlideTutor"
+APP_SUBTITLE = "Your elegant study companion"
 
 
 def initialize_session_state_defaults():
