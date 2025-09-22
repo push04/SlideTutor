@@ -186,16 +186,18 @@ def widget_key(prefix, upload=None, index=None):
 def safe_rerun():
     """
     Safe rerun for environments where st.experimental_rerun may not exist.
-    Writes a token to session_state which forces a rerun; otherwise calls experimental_rerun().
+    If Streamlit exposes experimental_rerun, call it. Otherwise mutate a session token
+    so Streamlit re-runs the script and preserves state.
     """
     try:
-        if hasattr(st, "experimental_rerun"):
-            safe_rerun()
+        if hasattr(st, "experimental_rerun") and callable(getattr(st, "experimental_rerun")):
+            # call Streamlit's rerun if available
+            st.experimental_rerun()
         else:
-            # trigger rerun by mutating session state token
+            # fall back to toggling a session token to force rerun
             st.session_state["_rerun_token"] = st.session_state.get("_rerun_token", 0) + 1
     except Exception:
-        # last-resort: mutate token
+        # last-resort fallback: mutate token (no risk)
         st.session_state["_rerun_token"] = st.session_state.get("_rerun_token", 0) + 1
 
 
@@ -1554,17 +1556,45 @@ def render_upload_tab():
     if not st.session_state.uploads:
         st.info("No uploads yet. Use the uploader above.")
         return
-    for i, up in enumerate(list(st.session_state.uploads)):
-    # use stable key parts derived from upload
-        key_base = widget_key("upload", upload=up, index=i)
-        with st.expander(f"{up['filename']} — {up.get('status_msg','')}", expanded=False):
-            cols = st.columns([3,1,1,1])
-            cols[0].markdown(f"**{up['filename']}**\n\nStatus: {up.get('status_msg','')}")
-            # PROCESS button (unique key)
-            proc_key = f"{key_base}_proc"
-            if cols[1].button("Process", key=proc_key, disabled=bool(up.get("index_built", False))):
-                handle_file_processing(i)
+    for i, up in enumerate(st.session_state.uploads):
+        with st.expander(f"{up['filename']} — {up.get('status_msg','Ready')}", expanded=False):
+            c1, c2, c3 = st.columns([2,1,1])
+            c1.write(f"Slides/Pages: {up.get('slide_count', 0)}")
+            c1.write(f"Chunks: {len(up.get('chunks', []))}")
+
+            # build stable key base from db_id or filename
+            uid = up.get("db_id") or up.get("filename") or str(i)
+            safe_uid = _sanitize_key(uid)
+
+            build_key = f"build_{safe_uid}"
+            del_key = f"del_{safe_uid}"
+
+            if c2.button("Build Index", key=build_key, disabled=bool(up.get("index_built", False))):
+                with st.spinner("Building index..."):
+                    build_vector_index(up)
                 safe_rerun()
+
+        if c3.button("Delete", key=del_key):
+            # prefer to delete by matching filename/db_id instead of raw index (index can shift)
+            try:
+                # attempt to also remove from DB if possible
+                dbid = up.get("db_id")
+                if dbid and _HAS_SQLITE:
+                    try:
+                        conn = get_db_connection()
+                        with conn:
+                            conn.execute("DELETE FROM uploads WHERE id = ?", (dbid,))
+                    except Exception:
+                        logger.exception("Failed to delete DB record for upload %s", dbid)
+                # remove from session list
+                # use next() to find index to avoid stale i
+                idx_to_remove = next((j for j, uu in enumerate(st.session_state.uploads) if (uu.get("db_id") == dbid or uu.get("filename") == up.get("filename"))), None)
+                if idx_to_remove is not None:
+                    st.session_state.uploads.pop(idx_to_remove)
+            except Exception:
+                logger.exception("Failed to delete upload item safely")
+            safe_rerun()
+
 
             # PREVIEW button (unique key)
             preview_key = f"{key_base}_preview"
@@ -2881,57 +2911,6 @@ def main():
         # Settings
         render_settings_tab()
 
-# ---------- UI parts referenced by main() ----------
-def render_upload_tab():
-    st.markdown("### Upload & prepare documents")
-    st.markdown("<p class='small-muted'>Drop PPTX or PDF files. Each will be parsed into slides/pages and chunked for indexing.</p>", unsafe_allow_html=True)
-    uploaded = st.file_uploader("Upload PPTX or PDF files", type=["pptx", "pdf"], accept_multiple_files=True)
-    if uploaded:
-        exist = {u["filename"] for u in st.session_state.uploads}
-        for f in uploaded:
-            if f.name in exist:
-                st.warning(f"File '{f.name}' already uploaded; skipped.")
-                continue
-            try:
-                with st.spinner(f"Parsing {f.name}..."):
-                    new = process_new_upload(f)
-                    st.session_state.uploads.append(new)
-                    st.success(f"Uploaded: {f.name}")
-            except Exception as e:
-                st.error(f"Failed to process {f.name}: {e}")
-
-    if not st.session_state.uploads:
-        st.info("No uploads yet.")
-        return
-
-    st.markdown("---")
-    st.markdown("#### Uploaded documents")
-    for i, up in enumerate(st.session_state.uploads):
-        with st.expander(f"{up['filename']} — {up.get('status_msg','Ready')}", expanded=False):
-            c1, c2, c3 = st.columns([2,1,1])
-            c1.write(f"Slides/Pages: {up.get('slide_count', 0)}")
-            c1.write(f"Chunks: {len(up.get('chunks', []))}")
-            if up.get("index_built"):
-                try:
-                    emb = up.get("embeddings")
-                    shape_desc = ""
-                    if _NP_AVAILABLE and emb is not None:
-                        try:
-                            shape_desc = f"{_np.asarray(emb).shape[0]} vectors × {_np.asarray(emb).shape[1]} dims"
-                        except Exception:
-                            shape_desc = "built (shape unknown)"
-                    else:
-                        shape_desc = "built"
-                    c1.write(f"Index: {shape_desc}")
-                except Exception:
-                    c1.write("Index: built")
-            if c2.button("Build Index", key=f"build_{i}", disabled=up.get("index_built", False)):
-                with st.spinner("Building index..."):
-                    build_vector_index(up)
-                safe_rerun()
-            if c3.button("Delete", key=f"del_{i}"):
-                st.session_state.uploads.pop(i)
-                safe_rerun()
 
 def render_lessons_tab():
     uploads = [u for u in st.session_state.uploads if u.get("index_built")]
