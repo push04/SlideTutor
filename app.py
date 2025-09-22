@@ -1082,14 +1082,7 @@ def answer_question_with_rag_safe(query, indexed_uploads, top_k=None):
 # UI: polished, simple, professional
 # ----------------------------
 APP_CSS = """
-/* SlideTutor — Clean professional dark theme
-   Paste into Streamlit with:
-   st.markdown(f"<style>{APP_CSS}</style>", unsafe_allow_html=True)
-*/
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-
-:root {
+:root{
   --bg-0: #051022;
   --bg-1: #061428;
   --panel: rgba(255,255,255,0.02);
@@ -1097,182 +1090,75 @@ APP_CSS = """
   --text: #E6F0FA;
   --accent-1: #6C5CE7;
   --accent-2: #4b2bd0;
-  --success: #2AB76A;
-  --danger: #FF6B6B;
-  --glass: rgba(255,255,255,0.025);
   --radius: 12px;
-  --radius-sm: 8px;
   --shadow-soft: 0 8px 24px rgba(2,6,12,0.55);
-  --shadow-subtle: 0 6px 18px rgba(2,6,12,0.45);
-  --space: 16px;
   --max-width: 1180px;
-  --accent-grad: linear-gradient(90deg, var(--accent-1), var(--accent-2));
 }
 
-/* Base document */
 html, body, .stApp {
   min-height: 100%;
-  background: radial-gradient(800px 360px at 10% 12%, rgba(76,64,156,0.06), transparent 10%),
-              linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+  background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
   color: var(--text);
-  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.45;
 }
 
-/* Page container */
-.block-container {
-  padding: 28px 32px !important;
-  max-width: var(--max-width);
-  margin-left: auto;
-  margin-right: auto;
-}
+/* container */
+.block-container { padding: 28px 32px !important; max-width: var(--max-width); margin: 0 auto; }
 
-/* Card */
+/* cards */
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.016), rgba(255,255,255,0.008));
   border-radius: var(--radius);
-  padding: calc(var(--space) * 0.9);
-  margin-bottom: 18px;
+  padding: 16px;
+  margin-bottom: 16px;
   border: 1px solid rgba(255,255,255,0.03);
   box-shadow: var(--shadow-soft);
-  transition: transform 160ms ease, box-shadow 160ms ease;
 }
-.card:hover { transform: translateY(-4px); box-shadow: var(--shadow-subtle); }
 
-/* Header */
-.app-header { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
-.app-logo {
-  width:48px; height:48px; border-radius:10px;
-  display:inline-grid; place-items:center; font-size:1.2rem;
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  box-shadow: 0 6px 18px rgba(2,6,12,0.45);
-}
-.app-title { font-size:1.35rem; font-weight:700; margin:0; }
+/* header */
+.app-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+.app-logo { width:44px; height:44px; border-radius:10px; display:inline-grid; place-items:center; background:rgba(255,255,255,0.02); }
+.app-title { font-size:1.25rem; font-weight:700; margin:0; }
 .app-sub { color:var(--muted); margin:0; font-size:0.95rem; }
 
-/* Sidebar tweaks */
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, rgba(255,255,255,0.008), rgba(255,255,255,0.004));
-  border-right: 1px solid rgba(255,255,255,0.02);
-  padding-top: 18px;
-}
-
-/* Uploader & file list */
-.uploader {
-  border: 1px dashed rgba(255,255,255,0.04);
-  padding: 14px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.01);
-}
-.uploader .hint { color: var(--muted); font-size:0.95rem; }
-.file-row {
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
-  padding:10px; border-radius:8px; background:var(--glass); margin-bottom:8px;
-}
-.file-meta { display:flex; gap:10px; align-items:center; }
+/* uploader */
+.uploader { border:1px dashed rgba(255,255,255,0.04); padding:12px; border-radius:10px; background:rgba(255,255,255,0.01); }
+.file-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.01); margin-bottom:8px; }
 .file-name { font-weight:600; color:var(--text); }
 .file-small { color:var(--muted); font-size:0.92rem; }
 
-/* Slide preview */
-.preview-slide {
-  display:flex; gap:12px; align-items:flex-start;
-  background: rgba(255,255,255,0.014);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-  border: 1px solid rgba(255,255,255,0.02);
-}
-.slide-thumb {
-  width:120px; height:76px; border-radius:8px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.92rem;
-  overflow:hidden; flex-shrink:0;
-}
+/* preview */
+.preview-slide { display:flex; gap:12px; align-items:flex-start; padding:10px; border-radius:8px; background:rgba(255,255,255,0.012); border:1px solid rgba(255,255,255,0.02); }
+.slide-thumb { width:120px; height:76px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); overflow:hidden; }
 .slide-text { font-size:0.95rem; color:var(--text); }
 
-/* Buttons (primary) */
+/* primary button */
 .stButton>button {
-  border-radius: 10px !important;
-  padding: 8px 14px !important;
-  background: var(--accent-grad) !important;
-  color: #fff !important;
-  border: none !important;
-  box-shadow: 0 6px 18px rgba(77,92,230,0.12);
-  transition: transform 130ms ease, box-shadow 130ms ease, opacity 130ms ease;
+  border-radius:10px !important;
+  padding:8px 14px !important;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2)) !important;
+  color:#fff !important;
+  border:none !important;
+  box-shadow:0 6px 18px rgba(77,92,230,0.12);
 }
-.stButton>button:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(77,92,230,0.16); }
-.stButton>button[disabled] { opacity:0.6; transform:none; cursor:not-allowed; }
 
-/* Secondary/ghost utilities you can apply via class names in markdown */
-.btn-secondary { background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); color: var(--text) !important; border:1px solid rgba(255,255,255,0.03); box-shadow:none !important; }
-.btn-ghost { background: transparent !important; color: var(--muted) !important; border:1px solid rgba(255,255,255,0.02) !important; }
-
-/* Inputs */
+/* inputs */
 textarea, input, .stTextInput, .stTextArea {
-  border-radius: 10px !important;
-  border: 1px solid rgba(255,255,255,0.03) !important;
+  border-radius:10px !important;
+  border:1px solid rgba(255,255,255,0.03) !important;
   background: rgba(255,255,255,0.008) !important;
-  padding: 10px !important;
-  color: var(--text) !important;
-  transition: box-shadow 140ms ease;
-}
-textarea:focus, input:focus, .stTextInput:focus, .stTextArea:focus {
-  outline: none !important;
-  box-shadow: 0 6px 20px rgba(76,84,255,0.12);
-  border-color: rgba(108,92,231,0.18) !important;
+  padding:10px !important;
+  color:var(--text) !important;
 }
 
-/* Chat bubbles */
-.chat-container { display:flex; flex-direction:column; gap:10px; }
-.chat-message { max-width:80%; padding:12px 14px; border-radius:12px; line-height:1.4; }
-.chat-user { align-self:flex-end; background: linear-gradient(90deg,#2b2b2b,#1f2430); color:#fff; border: 1px solid rgba(255,255,255,0.02); }
-.chat-assistant { align-self:flex-start; background: rgba(255,255,255,0.012); color:var(--text); border: 1px solid rgba(255,255,255,0.02); }
-
-/* Flashcards */
-.flashcard { background: rgba(255,255,255,0.012); padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); box-shadow: var(--shadow-subtle); }
-.flashcard-controls { display:flex; gap:8px; margin-top:10px; }
-
-/* Progress bar */
-.progress-wrap { background: rgba(255,255,255,0.02); border-radius: 10px; padding: 6px; }
-.progress-bar { height:10px; border-radius:10px; background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); overflow:hidden; }
-.progress-bar > span { display:block; height:100%; background: linear-gradient(90deg, var(--accent-1), var(--accent-2)); border-radius:10px; }
-
-/* Small utilities */
-.kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:3px 6px; font-weight:600; font-size:0.85rem; color:var(--muted); border:1px solid rgba(255,255,255,0.02); }
-.center { display:flex; justify-content:center; align-items:center; }
-.small-muted { color: var(--muted); font-size:0.92rem; }
-
-/* Accessibility focus-visible */
-:focus, .stButton>button:focus, .stTextInput:focus, .stTextArea:focus {
-  outline: 3px solid rgba(108,92,231,0.12);
-  outline-offset: 2px;
-}
-:focus:not(:focus-visible) { outline: none; }
-
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
-}
-
-/* Responsive adjustments */
-@media (max-width: 900px) {
-  .slide-thumb { width: 90px; height: 64px; }
-  .block-container { padding: 18px 16px !important; }
-  .app-title { font-size: 1.12rem; }
-}
-
-/* Optional light-theme override: add class "light-theme" to body via JS or app wrapper if you support a light mode */
-.light-theme {
-  --bg-0: #f6f8fb;
-  --bg-1: #eef2fb;
-  --panel: rgba(12,18,30,0.02);
-  --text: #071225;
-  --muted: #4b5563;
-  --accent-1: #3366ff;
-  --accent-2: #4b2bd0;
-}
+/* small helpers */
+.small-muted { color:var(--muted); font-size:0.92rem; }
+.kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:3px 6px; font-weight:600; font-size:0.85rem; color:var(--muted); }
 """
+
 APP_TITLE = "SlideTutor"
 APP_SUBTITLE = "Your elegant study companion"
 
