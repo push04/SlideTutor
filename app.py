@@ -155,6 +155,52 @@ except Exception as e:
     # Re-raise to avoid continuing in a broken state
     raise
 
+# -------------------------
+# Helper: stable widget keys & safe rerun
+# -------------------------
+def _sanitize_key(s):
+    """Make a short safe string for widget keys from filenames or ids."""
+    if s is None:
+        return "none"
+    try:
+        s = str(s)
+        # replace non-alnum with underscore and shorten
+        import re as _re
+        out = _re.sub(r'[^0-9a-zA-Z]', '_', s)
+        return out[:64]
+    except Exception:
+        return "key"
+
+def widget_key(prefix, upload=None, index=None):
+    """
+    Create a stable, unique key for widgets.
+    Prefer upload['db_id'] or filename; fallback to index.
+    """
+    uid = None
+    if isinstance(upload, dict):
+        uid = upload.get("db_id") or upload.get("filename")
+    if uid is None:
+        uid = index if index is not None else str(time.time())
+    return f"{prefix}_{_sanitize_key(uid)}_{index if index is not None else ''}"
+
+def safe_rerun():
+    """
+    Safe rerun for environments where st.experimental_rerun may not exist.
+    Writes a token to session_state which forces a rerun; otherwise calls experimental_rerun().
+    """
+    try:
+        if hasattr(st, "experimental_rerun"):
+            safe_rerun()
+        else:
+            # trigger rerun by mutating session state token
+            st.session_state["_rerun_token"] = st.session_state.get("_rerun_token", 0) + 1
+    except Exception:
+        # last-resort: mutate token
+        st.session_state["_rerun_token"] = st.session_state.get("_rerun_token", 0) + 1
+
+
+
+
 # DB helpers
 def save_upload_record(conn: sqlite3.Connection, filename: str, meta: Optional[Dict] = None) -> int:
     """Insert an uploads record and return its id."""
@@ -1483,7 +1529,13 @@ def render_home():
 def render_upload_tab():
     st.header("Upload & Process")
     st.markdown("<div class='card'>Use this uploader to add PPTX or PDF files. After upload, click 'Process' to extract text and build an index (if embeddings available).</div>", unsafe_allow_html=True)
-    uploaded_files = st.file_uploader("PPTX / PDF (multiple)", type=["pptx", "pdf"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+    "PPTX / PDF (multiple)",
+    type=["pptx", "pdf"],
+    accept_multiple_files=True,
+    key="file_uploader_main"  # explicit unique key for the main uploader
+)
+
     if uploaded_files:
         existing = {u["filename"] for u in st.session_state.uploads}
         for f in uploaded_files:
@@ -1503,29 +1555,50 @@ def render_upload_tab():
         st.info("No uploads yet. Use the uploader above.")
         return
     for i, up in enumerate(list(st.session_state.uploads)):
-        with st.expander(f"{up['filename']} — {up['status_msg']}", expanded=False):
+    # use stable key parts derived from upload
+        key_base = widget_key("upload", upload=up, index=i)
+        with st.expander(f"{up['filename']} — {up.get('status_msg','')}", expanded=False):
             cols = st.columns([3,1,1,1])
-            cols[0].markdown(f"**{up['filename']}**\n\nStatus: {up['status_msg']}")
-            if cols[1].button("Process", key=f"proc_{i}", disabled=up.get("index_built", False)):
+            cols[0].markdown(f"**{up['filename']}**\n\nStatus: {up.get('status_msg','')}")
+            # PROCESS button (unique key)
+            proc_key = f"{key_base}_proc"
+            if cols[1].button("Process", key=proc_key, disabled=bool(up.get("index_built", False))):
                 handle_file_processing(i)
-                st.experimental_rerun()
-            if cols[2].button("Preview slides", key=f"preview_{i}"):
+                safe_rerun()
+
+            # PREVIEW button (unique key)
+            preview_key = f"{key_base}_preview"
+            if cols[2].button("Preview slides", key=preview_key):
                 slides = up.get("slides_data", [])
                 if not slides:
                     st.warning("Process file first to preview slides.")
                 else:
                     for s in slides[:50]:
-                        st.markdown(f"<div class='preview-slide'><strong>Slide {s['index']+1}</strong><div style='margin-top:8px'>{(s['text'] or '')[:400]}</div>{('<em>OCR:</em><div>'+ (s['ocr_text'] or '')[:300] + '</div>') if s.get('ocr_text') else ''}</div>", unsafe_allow_html=True)
-            if cols[3].button("Delete", key=f"del_{i}"):
+                        st.markdown(f"**Slide {s['index']+1}**")
+                        if s.get("text"):
+                            st.write(s["text"])
+                        if s.get("ocr_text"):
+                            st.caption("OCR text:")
+                            st.write(s["ocr_text"])
+                        st.markdown("---")
+
+            # DELETE button (unique key)
+            del_key = f"{key_base}_del"
+            if cols[3].button("Delete", key=del_key):
                 try:
-                    if up.get("db_id"):
-                        conn = get_db_connection()
-                        with conn:
-                            conn.execute("DELETE FROM uploads WHERE id = ?", (up["db_id"],))
+                    if up.get("db_id") and _HAS_SQLITE:
+                        try:
+                            conn = get_db_connection()
+                            with conn:
+                                conn.execute("DELETE FROM uploads WHERE id = ?", (up["db_id"],))
+                        except Exception:
+                            logger.exception("Failed to delete DB record for upload %s", up.get("db_id"))
+                    # remove from session uploads safely
+                    st.session_state.uploads.pop(i)
                 except Exception:
-                    pass
-                st.session_state.uploads.pop(i)
-                st.experimental_rerun()
+                    logger.exception("Failed to delete upload in UI loop")
+                safe_rerun()
+
 
 def render_lessons_tab():
     st.header("Lessons")
@@ -2642,19 +2715,19 @@ def render_flashcard_practice_ui():
     if col1.button("Again", key=f"again_{card.get('id')}"):
         update_flashcard_review(card, 1)
         st.session_state["current_card_idx"] = idx + 1
-        st.experimental_rerun()
+        safe_rerun()
     if col2.button("Hard", key=f"hard_{card.get('id')}"):
         update_flashcard_review(card, 3)
         st.session_state["current_card_idx"] = idx + 1
-        st.experimental_rerun()
+        safe_rerun()
     if col3.button("Good", key=f"good_{card.get('id')}"):
         update_flashcard_review(card, 4)
         st.session_state["current_card_idx"] = idx + 1
-        st.experimental_rerun()
+        safe_rerun()
     if col4.button("Easy", key=f"easy_{card.get('id')}"):
         update_flashcard_review(card, 5)
         st.session_state["current_card_idx"] = idx + 1
-        st.experimental_rerun()
+        safe_rerun()
 
 # ---------- Render header ----------
 def render_header():
@@ -2855,10 +2928,10 @@ def render_upload_tab():
             if c2.button("Build Index", key=f"build_{i}", disabled=up.get("index_built", False)):
                 with st.spinner("Building index..."):
                     build_vector_index(up)
-                st.experimental_rerun()
+                safe_rerun()
             if c3.button("Delete", key=f"del_{i}"):
                 st.session_state.uploads.pop(i)
-                st.experimental_rerun()
+                safe_rerun()
 
 def render_lessons_tab():
     uploads = [u for u in st.session_state.uploads if u.get("index_built")]
@@ -2940,7 +3013,7 @@ def render_flashcards_tab():
     if st.button("Load due cards for practice"):
         st.session_state.due_cards = get_due_flashcards()
         st.session_state.current_card_idx = 0
-        st.experimental_rerun()
+        safe_rerun()
     if st.session_state.get("due_cards"):
         render_flashcard_practice_ui()
 
