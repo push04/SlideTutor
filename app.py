@@ -1082,26 +1082,248 @@ def answer_question_with_rag_safe(query, indexed_uploads, top_k=None):
 # UI: polished, simple, professional
 # ----------------------------
 APP_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+/* ----------------------------------------------------------
+   SlideTutor — Professional UI theme
+   - Modern, accessible dark theme with careful spacing, focus states,
+     responsive layouts, and component utility classes.
+   - Drop this string into your app and apply via st.markdown(f"<style>{APP_CSS}</style>", unsafe_allow_html=True)
+   ---------------------------------------------------------- */
+
+/* Import a reliable variable font (Inter) for legible UI text */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+
 :root{
-  --bg:#071025;
-  --card:#071424;
-  --muted:#9AA6B2;
-  --accent:#6C5CE7;
-  --radius:12px;
+  /* Color palette (dark theme) */
+  --bg: #061227;            /* page background */
+  --bg-2: #07162b;          /* subtle panel background */
+  --card: rgba(255,255,255,0.03);
+  --muted: #9AA6B2;
+  --text: #E6F0FA;
+  --accent: #6C5CE7;        /* primary gradient start */
+  --accent-2: #4b2bd0;      /* primary gradient end */
+  --accent-3: #2AB7A9;      /* secondary accent (eg. success highlights) */
+  --success: #2AB76A;
+  --danger: #FF6B6B;
+  --glass: rgba(255,255,255,0.025);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-1: 0 6px 20px rgba(2,6,12,0.6);
+  --shadow-2: 0 4px 12px rgba(2,8,20,0.45);
+  --spacing: 16px;
+  --max-width: 1200px;
+  --accent-gradient: linear-gradient(90deg, var(--accent), var(--accent-2));
+  --transition-fast: 150ms ease;
+  --transition-medium: 240ms ease;
 }
-body, .stApp {
-  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, Arial;
-  background: linear-gradient(180deg,#051022 0%, #061428 100%);
-  color: #E6F0FA;
+
+/* Base + layout */
+html, body, .stApp {
+  height: 100%;
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(92,72,172,0.08), transparent 10%),
+              linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.45;
+  -webkit-tap-highlight-color: transparent;
 }
-.block-container { padding: 26px 28px !important; }
-.card { background: rgba(255,255,255,0.02); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.03); box-shadow: 0 8px 30px rgba(2,6,12,0.6); }
-.small-muted { color: var(--muted); font-size: 0.95rem; }
-.stButton>button { border-radius: 10px !important; padding: 8px 14px !important; background: linear-gradient(90deg,var(--accent), #4b2bd0) !important; color: #fff !important; border: none !important; box-shadow: 0 6px 18px rgba(108,92,231,0.14); }
-textarea, input, .stTextInput, .stTextArea { border-radius: 10px !important; }
-.preview-slide { background: rgba(255,255,255,0.02); border-radius: 10px; padding: 8px; margin-bottom: 8px; }
+
+/* Container padding tuned for a clean, airy feel */
+.block-container {
+  padding: 28px 32px !important;
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+/* Card styles */
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.018), rgba(255,255,255,0.008));
+  border-radius: var(--radius);
+  padding: calc(var(--spacing) * 0.875);
+  margin-bottom: 18px;
+  border: 1px solid rgba(255,255,255,0.03);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.card:hover { transform: translateY(-4px); box-shadow: var(--shadow-2); }
+
+/* Card header / meta */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.card-title { font-size: 1.05rem; font-weight: 700; color: var(--text); margin: 0; }
+.card-sub { font-size: 0.92rem; color: var(--muted); margin: 0; }
+
+/* Elegant app header (logo + title) */
+.app-header {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:18px;
+}
+.app-logo {
+  width:48px; height:48px;
+  display:inline-flex; align-items:center; justify-content:center;
+  border-radius:10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  box-shadow: 0 6px 18px rgba(11,12,30,0.5);
+  font-size:1.4rem;
+}
+.app-title { font-size:1.4rem; font-weight:700; margin:0; }
+.app-subtitle { color:var(--muted); font-size:0.95rem; margin:0; }
+
+/* Sidebar refinements (Streamlit's sidebar) */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.006));
+  border-right: 1px solid rgba(255,255,255,0.03);
+  padding-top: 20px;
+}
+[data-testid="stSidebar"] .stButton>button { width:100%; }
+
+/* Tabs / navigation */
+.css-1v3fvcr, .stTabs { /* fallback for older streamlit classes */
+  display:block;
+}
+
+/* File uploader / preview */
+.uploader {
+  border: 1px dashed rgba(255,255,255,0.04);
+  padding: 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), transparent);
+}
+.uploader .hint { color: var(--muted); font-size:0.95rem; }
+
+/* Compact file list rows */
+.file-row {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:10px; border-radius:8px; background:var(--glass); margin-bottom:8px;
+}
+.file-meta { display:flex; align-items:center; gap:10px; }
+.file-name { font-weight:600; color:var(--text); }
+.file-small { color:var(--muted); font-size:0.92rem; }
+
+/* Slide preview block */
+.preview-slide {
+  display:flex; gap:12px; align-items:flex-start;
+  background: rgba(255,255,255,0.015);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,0.02);
+}
+.slide-thumb {
+  width: 120px; height: 80px; border-radius:8px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:0.92rem; overflow:hidden;
+  flex-shrink:0;
+}
+.slide-text { font-size:0.95rem; color:var(--text); }
+
+/* Buttons: primary / secondary / ghost */
+.stButton>button {
+  border-radius: 10px !important;
+  padding: 8px 14px !important;
+  background: var(--accent-gradient) !important;
+  color: #fff !important;
+  border: none !important;
+  box-shadow: 0 6px 18px rgba(77,92,230,0.12);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+.stButton>button:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(77,92,230,0.18); }
+.stButton>button:active { transform: translateY(0); }
+.stButton>button[disabled] { opacity: 0.6; transform:none; box-shadow:none; cursor:not-allowed; }
+
+/* Utility variants */
+.btn-secondary {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+  color: var(--text) !important;
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: none !important;
+}
+.btn-ghost {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border: 1px solid rgba(255,255,255,0.02) !important;
+}
+
+/* Badges and small labels */
+.badge {
+  display:inline-block; padding:4px 8px; font-size:0.82rem; border-radius:999px; background:rgba(255,255,255,0.02); color:var(--muted);
+}
+
+/* Muted & helper text */
+.small-muted { color: var(--muted); font-size: 0.92rem; }
+
+/* Input / textarea styling */
+textarea, input, .stTextInput, .stTextArea {
+  border-radius: 10px !important;
+  border: 1px solid rgba(255,255,255,0.03) !important;
+  background: rgba(255,255,255,0.01) !important;
+  padding: 10px !important;
+  color: var(--text) !important;
+  transition: box-shadow var(--transition-fast);
+}
+textarea:focus, input:focus, .stTextInput:focus, .stTextArea:focus {
+  outline: none !important;
+  box-shadow: 0 6px 20px rgba(76,84,255,0.12);
+  border-color: rgba(108,92,231,0.22) !important;
+}
+
+/* Chat bubbles */
+.chat-container { display:flex; flex-direction:column; gap:10px; }
+.chat-message { max-width:80%; padding:12px 14px; border-radius:12px; line-height:1.4; }
+.chat-user { align-self:flex-end; background: linear-gradient(90deg,#2b2b2b, #1f2430); color:#fff; border: 1px solid rgba(255,255,255,0.02); }
+.chat-assistant { align-self:flex-start; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); color:var(--text); border:1px solid rgba(255,255,255,0.02); }
+
+/* Flashcards */
+.flashcard { background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.008)); padding: 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.02); box-shadow: var(--shadow-2); }
+.flashcard-controls { display:flex; gap:8px; margin-top:10px; }
+
+/* Progress / loaders */
+.progress-wrap { background: rgba(255,255,255,0.02); border-radius: 10px; padding: 6px; }
+.progress-bar { height:10px; border-radius:10px; background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); overflow:hidden; }
+.progress-bar > span { display:block; height:100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius:10px; }
+
+/* Small utilities */
+.kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:3px 6px; font-weight:600; font-size:0.85rem; color:var(--muted); border:1px solid rgba(255,255,255,0.02); }
+.center { display:flex; justify-content:center; align-items:center; }
+
+/* Focus-visible for accessibility */
+:focus, .stButton>button:focus, .stTextInput:focus, .stTextArea:focus {
+  outline: 3px solid rgba(108,92,231,0.12);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+/* Low-motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Responsive tweaks */
+@media (max-width: 900px) {
+  .slide-thumb { width: 90px; height: 64px; }
+  .block-container { padding: 18px 16px !important; }
+  .app-title { font-size: 1.12rem; }
+}
+
+/* Light theme override (optional) - apply .light-theme on body */
+.light-theme {
+  --bg: #f6f7fb;
+  --bg-2: #eef2fb;
+  --card: rgba(12,18,30,0.02);
+  --text: #071225;
+  --muted: #4b5563;
+  --accent: #3366ff;
+  --accent-2: #4b2bd0;
+  background: linear-gradient(180deg, #f6f8fc 0%, #eef2fb 100%);
+}
 """
+
 
 def initialize_session_state_defaults():
     defaults = {
