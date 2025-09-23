@@ -1118,11 +1118,17 @@ html, body, .stApp {
   box-shadow: var(--shadow-soft);
 }
 
+
+
 /* header */
-.app-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+/* ===== header tweaks to avoid cropping/wrapping issues ===== */
+.app-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.app-title { font-size:1.6rem; font-weight:700; margin:0; line-height:1.15; max-width:72%; overflow-wrap:break-word; word-break:break-word; }
+.app-sub { color:var(--muted); margin:0; font-size:0.98rem; max-width:72%; overflow-wrap:break-word; }
+.block-container { padding: 20px 24px !important; max-width: var(--max-width); margin: 0 auto; }
+/* ensure the header area doesn't get visually cropped on small windows */
+.stApp .block-container > :first-child { margin-top: 6px; }
 .app-logo { width:44px; height:44px; border-radius:10px; display:inline-grid; place-items:center; background:rgba(255,255,255,0.02); }
-.app-title { font-size:1.25rem; font-weight:700; margin:0; }
-.app-sub { color:var(--muted); margin:0; font-size:0.95rem; }
 
 /* uploader */
 .uploader { border:1px dashed rgba(255,255,255,0.04); padding:12px; border-radius:10px; background:rgba(255,255,255,0.01); }
@@ -1195,7 +1201,10 @@ def render_home():
 def render_upload_tab():
     st.header("Upload & Process")
     st.markdown("<div class='card'>Upload PPTX or PDF files. Then process to extract text & OCR, optionally build embeddings (if available).</div>", unsafe_allow_html=True)
+
+    auto_index = st.checkbox("Auto-build index after upload (attempt)", value=True, key="auto_build_index_opt")
     uploaded_files = st.file_uploader("PPTX / PDF — multiple", type=["pptx", "pdf"], accept_multiple_files=True, key="uploader")
+
     if uploaded_files:
         existing = {u["filename"] for u in st.session_state.uploads}
         for f in uploaded_files:
@@ -1203,10 +1212,19 @@ def render_upload_tab():
                 up = process_new_upload_safe(f)
                 st.session_state.uploads.append(up)
                 st.success(f"Added: {f.name}")
+                # auto-build optionally
+                if auto_index:
+                    try:
+                        build_vector_index_safe(up)
+                        st.info(up.get("status_msg", "Index attempted"))
+                    except Exception:
+                        logger.exception("Auto index failed")
                 safe_rerun()
+
     if not st.session_state.uploads:
         st.info("No uploads yet. Use the uploader above.")
         return
+
     for i, up in enumerate(list(st.session_state.uploads)):
         with st.expander(f"{up['filename']} — {up.get('status_msg','Ready')}", expanded=False):
             cols = st.columns([3,1,1])
@@ -1219,16 +1237,35 @@ def render_upload_tab():
                 st.session_state.active_upload_idx = i
                 st.success("Selected for operations")
                 safe_rerun()
+
+            # show file preview (images first)
             if up.get("slides_data"):
-                if st.button("Preview (first 10 slides)", key=f"preview_{_sanitize_key(up['filename'])}"):
+                if st.button("Preview (first 10 slides as images)", key=f"preview_img_{_sanitize_key(up['filename'])}"):
                     for s in up.get("slides_data", [])[:10]:
                         st.markdown(f"**Slide {s['index']+1}**")
-                        if s.get("text"):
-                            st.write(s["text"])
-                        if s.get("ocr_text"):
-                            st.caption("OCR text:")
-                            st.write(s["ocr_text"])
+                        imgs = s.get("images") or []
+                        if imgs:
+                            # show up to 3 images as thumbnails
+                            imgs_to_show = imgs[:3]
+                            cols2 = st.columns(len(imgs_to_show))
+                            for c_idx, img_bytes in enumerate(imgs_to_show):
+                                try:
+                                    cols2[c_idx].image(io.BytesIO(img_bytes), width=220, use_column_width=False)
+                                except Exception:
+                                    try:
+                                        cols2[c_idx].write("Image preview not available")
+                                    except Exception:
+                                        pass
+                        else:
+                            # fallback to text / OCR
+                            if s.get("text"):
+                                st.write(s["text"])
+                            if s.get("ocr_text"):
+                                st.caption("OCR text:")
+                                st.write(s["ocr_text"])
                         st.markdown("---")
+
+            # delete action
             if st.button("Delete upload", key=f"del_{_sanitize_key(up['filename'])}"):
                 try:
                     dbid = up.get("db_id")
@@ -1246,6 +1283,7 @@ def render_upload_tab():
                     logger.exception("Delete failed")
                     st.error("Failed to delete upload.")
 
+
 def render_lessons_tab():
     st.header("Generate Lesson")
     uploads = [u for u in st.session_state.uploads if u.get("processed")]
@@ -1262,51 +1300,239 @@ def render_lessons_tab():
 
 def render_chat_tab():
     st.header("Ask Questions (RAG)")
-    uploads = [u for u in st.session_state.uploads if u.get("index_built")]
-    if not uploads:
+    indexed = [u for u in st.session_state.uploads if u.get("index_built")]
+    if not indexed:
         st.warning("No indexed uploads. Build an index on the Upload tab to enable RAG.")
         return
-    prompt = st.text_input("Ask a question about your documents", key="rag_input")
-    if st.button("Get answer"):
+
+    opts = {u['filename']: u for u in indexed}
+    chosen = st.multiselect("Which indexed documents to search (multi-select)", list(opts.keys()), default=list(opts.keys()))
+    docs = [opts[n] for n in chosen] if chosen else indexed
+
+    with st.form("rag_form"):
+        prompt = st.text_area("Ask a question about your documents", key="rag_input_area", height=120)
+        top_k_local = st.number_input("Context chunks to retrieve (top_k)", min_value=1, max_value=20, value=TOP_K)
+        submitted = st.form_submit_button("Get answer")
+    if submitted:
         if not prompt or not prompt.strip():
             st.warning("Provide a question.")
         else:
             with st.spinner("Searching..."):
-                ans = answer_question_with_rag_safe(prompt, uploads, top_k=TOP_K)
+                ans = answer_question_with_rag_safe(prompt, docs, top_k=top_k_local)
                 st.markdown("**Answer:**")
-                st.write(ans)
+                # prefer markdown so newlines render cleanly
+                try:
+                    st.markdown(ans)
+                except Exception:
+                    st.write(ans)
+                # show simple context snippets used (best-effort)
+                with st.expander("Context snippets used (first matches)"):
+                    snippets_shown = 0
+                    for up in docs:
+                        chunks = (up.get("chunks") or [])[:5]
+                        if not chunks:
+                            continue
+                        st.markdown(f"**{up.get('filename')}**")
+                        for c in chunks[:3]:
+                            st.write(c[:800] + ("..." if len(c) > 800 else ""))
+                            snippets_shown += 1
+                            if snippets_shown >= 6:
+                                break
+                        if snippets_shown >= 6:
+                            break
+
 
 def render_quizzes_tab():
-    st.header("Generate MCQs")
+    st.header("Generate & Take MCQs")
     uploads = [u for u in st.session_state.uploads if u.get("processed")]
     if not uploads:
-        st.info("Process an upload first.")
+        st.info("Process an upload first on the Upload tab.")
         return
+
+    # select upload
     opts = {u["filename"]: idx for idx, u in enumerate(uploads)}
-    sel = st.selectbox("Select document", list(opts.keys()))
+    sel = st.selectbox("Select document", list(opts.keys()), key="quiz_doc_select")
     up = uploads[opts[sel]]
-    qcount = st.slider("Number of MCQs", 1, 20, 5)
-    if st.button("Generate MCQs"):
-        with st.spinner("Generating..."):
-            mcqs = generate_mcq_set_from_text(up.get("full_text",""), qcount=qcount)
-            if mcqs:
-                st.json(mcqs)
-                try:
-                    conn = get_db_connection()
-                    now = int(time.time())
-                    with conn:
-                        for obj in mcqs:
-                            qtext = obj.get("question","")
-                            opts = obj.get("options",[])
-                            ans = int(obj.get("answer_index", 0))
-                            conn.execute("INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
-                                         (str(up.get("db_id") or up.get("filename")), qtext, json.dumps(opts), ans, now))
-                    st.success("MCQs saved to DB")
-                except Exception:
-                    logger.exception("Save MCQs failed")
-                    st.warning("Could not save MCQs to DB.")
+
+    # generation options
+    gen_col1, gen_col2, gen_col3 = st.columns([2, 2, 1])
+    qcount = gen_col1.slider("Number of MCQs to generate", 1, 20, 5, key="gen_qcount")
+    temp_opt = gen_col2.slider("LLM temperature (lower = more deterministic)", 0.0, 1.0, 0.0, 0.1, key="gen_temp")
+    shuffle_before = gen_col3.checkbox("Shuffle questions", value=True, key="gen_shuffle")
+
+    # store latest generated mcqs in session so user can interact without re-generating
+    if "latest_generated_mcqs" not in st.session_state or st.session_state.get("latest_generated_for") != up.get("filename"):
+        st.session_state["latest_generated_mcqs"] = []
+        st.session_state["latest_generated_for"] = None
+
+    if st.button("Generate MCQs", key=f"gen_mcq_{_sanitize_key(up['filename'])}"):
+        with st.spinner("Generating MCQs from document..."):
+            try:
+                mcqs = generate_mcq_set_from_text(up.get("full_text", ""), qcount=qcount)
+            except Exception as e:
+                logger.exception("MCQ generation call failed: %s", e)
+                mcqs = []
+            if not mcqs:
+                st.warning("No MCQs returned from the model.")
+                st.session_state["latest_generated_mcqs"] = []
+                st.session_state["latest_generated_for"] = None
             else:
-                st.warning("No MCQs returned.")
+                # normalize structure and guard missing fields
+                normalized = []
+                for obj in mcqs:
+                    try:
+                        qtext = str(obj.get("question") or "").strip()
+                        options = list(obj.get("options") or [])
+                        # ensure options are strings
+                        options = [str(x) for x in options]
+                        if not options:
+                            # fallback: try to parse 'answers' or 'choices'
+                            continue
+                        answer_index = int(obj.get("answer_index", 0)) if obj.get("answer_index") is not None else 0
+                        answer_index = max(0, min(len(options) - 1, answer_index))
+                        normalized.append({"question": qtext, "options": options, "answer_index": answer_index})
+                    except Exception:
+                        continue
+                if not normalized:
+                    st.warning("MCQs returned were malformed and could not be used.")
+                    st.session_state["latest_generated_mcqs"] = []
+                    st.session_state["latest_generated_for"] = None
+                else:
+                    if shuffle_before:
+                        import random
+                        random.shuffle(normalized)
+                    st.session_state["latest_generated_mcqs"] = normalized
+                    st.session_state["latest_generated_for"] = up.get("filename")
+                    st.success(f"Generated {len(normalized)} MCQs (stored in session).")
+
+    # show generated MCQs (interactive)
+    mcqs = st.session_state.get("latest_generated_mcqs", [])
+    if mcqs:
+        st.markdown("### Preview / Take generated MCQs")
+        # create a unique namespace for radio keys so they survive reruns
+        answers = {}
+        for qi, q in enumerate(mcqs):
+            qkey = f"gen_mcq_{_sanitize_key(up['filename'])}_{qi}"
+            st.markdown(f"**Q{qi+1}. {q.get('question','(no text)')}**")
+            opts = q.get("options") or []
+            if not opts:
+                st.write("_No options for this question_")
+                continue
+            # if the saved answer_index might point to an option that gets shuffled later, we only use it for scoring
+            answers[qi] = st.radio(f"Select answer (Q{qi+1})", options=opts, key=qkey)
+            st.markdown("---")
+
+        if st.button("Submit generated answers", key=f"submit_generated_{_sanitize_key(up['filename'])}"):
+            score = 0
+            details = []
+            for qi, q in enumerate(mcqs):
+                opts = q.get("options") or []
+                correct_idx = int(q.get("answer_index", 0)) if opts else 0
+                correct_opt = opts[correct_idx] if (opts and 0 <= correct_idx < len(opts)) else (opts[0] if opts else None)
+                picked = st.session_state.get(f"gen_mcq_{_sanitize_key(up['filename'])}_{qi}")
+                ok = (picked == correct_opt)
+                if ok:
+                    score += 1
+                details.append((qi + 1, ok, correct_opt, picked))
+            st.success(f"You scored {score} / {len(mcqs)}")
+            for d in details:
+                qno, ok, correct_opt, picked = d
+                if ok:
+                    st.write(f"Q{qno}: ✅ Correct")
+                else:
+                    st.write(f"Q{qno}: ❌ Wrong — correct: **{correct_opt}**, you chose: {picked}")
+
+        # save generated MCQs to DB (grouped by upload id)
+        if st.button("Save generated MCQs to DB", key=f"save_generated_{_sanitize_key(up['filename'])}"):
+            try:
+                conn = get_db_connection()
+                now = int(time.time())
+                saved = 0
+                with conn:
+                    for obj in mcqs:
+                        qtext = obj.get("question", "")
+                        opts = obj.get("options", [])
+                        ans = int(obj.get("answer_index", 0)) if opts else 0
+                        conn.execute(
+                            "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                            (str(up.get("db_id") or up.get("filename")), qtext, json.dumps(opts), ans, now)
+                        )
+                        saved += 1
+                st.success(f"Saved {saved} MCQs to DB (upload_id={up.get('db_id') or up.get('filename')}).")
+            except Exception:
+                logger.exception("Save MCQs failed")
+                st.warning("Could not save MCQs to DB. Check logs.")
+
+    # allow taking saved MCQs from DB for this upload
+    st.markdown("### Saved MCQs (from DB)")
+    try:
+        conn = get_db_connection()
+        cur = conn.execute("SELECT id, question, options, correct_index, created_at FROM quizzes WHERE upload_id = ? ORDER BY created_at DESC", (str(up.get("db_id") or up.get("filename")),))
+        saved_rows = cur.fetchall() or []
+    except Exception:
+        saved_rows = []
+    if not saved_rows:
+        st.info("No saved MCQs for this document (you can generate and save above).")
+        return
+
+    # show a compact list and option to take a subset
+    take_count = st.number_input("How many recent saved MCQs to take", min_value=1, max_value=len(saved_rows), value=min(10, len(saved_rows)), step=1, key="take_saved_count")
+    take_button = st.button("Take saved MCQs", key=f"take_saved_{_sanitize_key(up['filename'])}")
+    if take_button:
+        # prepare questions
+        selected_rows = saved_rows[:int(take_count)]
+        quiz_items = []
+        for r in selected_rows:
+            try:
+                qid = r[0]
+                qtext = r[1] or ""
+                opts = json.loads(r[2]) if r[2] else []
+                correct_index = int(r[3] or 0)
+                # sanitize
+                opts = [str(x) for x in opts] if opts else []
+                if not opts:
+                    continue
+                quiz_items.append({"db_id": qid, "question": qtext, "options": opts, "answer_index": correct_index})
+            except Exception:
+                continue
+        if not quiz_items:
+            st.warning("Saved MCQs were malformed and cannot be taken.")
+        else:
+            # store in session under a unique key then rerun to render the interactive quiz
+            st.session_state[f"taking_saved_mcqs_for_{_sanitize_key(up['filename'])}"] = quiz_items
+            safe_rerun()
+
+    # if session has quiz to take, render it
+    session_key = f"taking_saved_mcqs_for_{_sanitize_key(up['filename'])}"
+    if st.session_state.get(session_key):
+        items = st.session_state.get(session_key)
+        st.markdown(f"#### Taking {len(items)} saved MCQs from DB (upload: {up.get('filename')})")
+        user_answers = {}
+        for i, it in enumerate(items):
+            st.markdown(f"**Q{i+1}. {it.get('question','(no text)')}**")
+            user_answers[i] = st.radio(f"Choose (saved_{i})", options=it.get("options", []), key=f"saved_mcq_radio_{_sanitize_key(up['filename'])}_{i}")
+            st.markdown("---")
+        if st.button("Submit saved-quiz answers", key=f"submit_saved_{_sanitize_key(up['filename'])}"):
+            score = 0
+            details = []
+            for i, it in enumerate(items):
+                opts = it.get("options", [])
+                correct_idx = int(it.get("answer_index", 0)) if opts else 0
+                correct_opt = opts[correct_idx] if (opts and 0 <= correct_idx < len(opts)) else (opts[0] if opts else None)
+                picked = st.session_state.get(f"saved_mcq_radio_{_sanitize_key(up['filename'])}_{i}")
+                ok = (picked == correct_opt)
+                if ok:
+                    score += 1
+                details.append((i + 1, ok, correct_opt, picked))
+            st.success(f"You scored {score} / {len(items)}")
+            for d in details:
+                qno, ok, correct_opt, picked = d
+                if ok:
+                    st.write(f"Q{qno}: ✅ Correct")
+                else:
+                    st.write(f"Q{qno}: ❌ Wrong — correct: **{correct_opt}**, you chose: {picked}")
+            # clear the session quiz after completion
+            del st.session_state[session_key]
 
 def render_flashcards_tab():
     st.header("Flashcards")
@@ -1314,17 +1540,65 @@ def render_flashcards_tab():
     if not uploads:
         st.info("Upload files first.")
         return
+
     sel = st.selectbox("Choose document", [u["filename"] for u in uploads], key="fc_doc_select")
     up = next((u for u in uploads if u["filename"] == sel), None)
-    if st.button("Generate Flashcards"):
+    if up is None:
+        st.warning("Selected upload not found in session.")
+        return
+
+    # generation options
+    gen_cols = st.columns([2, 2, 1])
+    num_cards = gen_cols[0].number_input("Max flashcards to generate", min_value=5, max_value=200, value=20, step=5, key="fc_gen_count")
+    per_slide = gen_cols[1].slider("Max per slide (best-effort)", 1, 5, 2, key="fc_per_slide")
+    preview_only = gen_cols[2].checkbox("Preview only (don't save)", value=False, key="fc_preview_only")
+
+    if st.button("Generate Flashcards", key=f"gen_fc_{_sanitize_key(up['filename'])}"):
         with st.spinner("Generating flashcards..."):
-            cards = generate_flashcards_from_text(up.get("full_text",""), n=20)
-            saved = add_flashcards_to_db_safe(up, cards)
-            st.success(f"Saved {saved} flashcards.")
-    if st.button("Load due cards for practice"):
+            cards = generate_flashcards_from_text(up.get("full_text", ""), n=int(num_cards))
+            if not cards:
+                st.warning("No flashcards returned.")
+            else:
+                # optionally save
+                if preview_only:
+                    st.info(f"Previewing {min(len(cards), 10)} flashcards (preview-only).")
+                    for c in cards[:10]:
+                        st.markdown(f"**Q:** {c.get('question')}")
+                        st.caption(f"A: {c.get('answer')}")
+                else:
+                    saved = add_flashcards_to_db_safe(up, cards)
+                    st.success(f"Saved {saved} flashcards to DB.")
+
+    # management & practice
+    manage_col1, manage_col2 = st.columns(2)
+    if manage_col1.button("Load due cards for practice"):
         st.session_state.due_cards = get_due_flashcards_safe()
         st.session_state.current_card_idx = 0
         safe_rerun()
+
+    if manage_col2.button("Preview 5 flashcards (from DB)"):
+        preview = get_due_flashcards_safe(upload=up, limit=5)
+        if preview:
+            for c in preview:
+                st.markdown(f"**Q:** {c.get('question')}")
+                st.caption(f"A: {c.get('answer')}")
+        else:
+            st.info("No flashcards to preview for this upload.")
+
+    # export
+    if st.button("Export all flashcards for this upload (Anki TSV)"):
+        uid = up.get("db_id") or up.get("filename")
+        try:
+            res = anki_export_tsv(uid, conn=get_db_connection())
+        except Exception:
+            res = anki_export_tsv(uid, conn=None)
+        if res:
+            fname, b = res
+            st.download_button("Download Anki TSV", data=b, file_name=fname, mime="text/tab-separated-values")
+        else:
+            st.warning("No flashcards found for this upload to export.")
+
+    # practice UI
     if st.session_state.get("due_cards"):
         render_flashcard_practice_ui()
 
@@ -1333,35 +1607,45 @@ def render_flashcard_practice_ui():
     if not cards:
         st.info("No due cards to practice now.")
         return
+
     idx = st.session_state.get("current_card_idx", 0)
-    if idx >= len(cards):
+    total = len(cards)
+    if idx >= total:
         st.success("✨ You finished all due cards in this session.")
         st.session_state["due_cards"] = []
         st.session_state["current_card_idx"] = 0
         return
+
     card = cards[idx]
-    st.markdown(f"##### Card {idx+1} of {len(cards)}")
+    st.markdown(f"##### Card {idx+1} of {total}")
     st.write(card.get("question"))
-    show = st.button("Show Answer", key=f"show_{card.get('id')}")
-    if show:
-        st.write("**Answer:**")
+    # allow toggle answer without triggering rerun of main flow
+    show_key = f"fc_show_answer_{card.get('id')}"
+    if show_key not in st.session_state:
+        st.session_state[show_key] = False
+    if st.button("Show Answer", key=f"show_btn_{card.get('id')}"):
+        st.session_state[show_key] = True
+    if st.session_state.get(show_key):
+        st.markdown("**Answer:**")
         st.write(card.get("answer"))
-    col1, col2, col3, col4 = st.columns(4)
-    if col1.button("Again", key=f"again_{card.get('id')}"):
+
+    # make review buttons compact and confirm action
+    col_again, col_hard, col_good, col_easy = st.columns([1,1,1,1])
+    if col_again.button("Again", key=f"again_{card.get('id')}"):
         update_flashcard_review_safe(card, 1)
-        st.session_state["current_card_idx"] += 1
+        st.session_state["current_card_idx"] = idx + 1
         safe_rerun()
-    if col2.button("Hard", key=f"hard_{card.get('id')}"):
+    if col_hard.button("Hard", key=f"hard_{card.get('id')}"):
         update_flashcard_review_safe(card, 3)
-        st.session_state["current_card_idx"] += 1
+        st.session_state["current_card_idx"] = idx + 1
         safe_rerun()
-    if col3.button("Good", key=f"good_{card.get('id')}"):
+    if col_good.button("Good", key=f"good_{card.get('id')}"):
         update_flashcard_review_safe(card, 4)
-        st.session_state["current_card_idx"] += 1
+        st.session_state["current_card_idx"] = idx + 1
         safe_rerun()
-    if col4.button("Easy", key=f"easy_{card.get('id')}"):
+    if col_easy.button("Easy", key=f"easy_{card.get('id')}"):
         update_flashcard_review_safe(card, 5)
-        st.session_state["current_card_idx"] += 1
+        st.session_state["current_card_idx"] = idx + 1
         safe_rerun()
 
 def render_settings_tab():
@@ -1370,12 +1654,12 @@ def render_settings_tab():
     if key != st.session_state.get("OPENROUTER_API_KEY"):
         st.session_state["OPENROUTER_API_KEY"] = key
         st.success("API key saved in session (not persisted).")
-    # Exports
+
     st.markdown("#### Export flashcards (Anki TSV)")
     upload_map = { (u.get("db_id") or u.get("filename")): u for u in st.session_state.uploads }
     if upload_map:
-        sel_key = st.selectbox("Select upload", options=list(upload_map.keys()), format_func=lambda k: upload_map[k]["filename"])
-        if st.button("Export Anki TSV"):
+        sel_key = st.selectbox("Select upload", options=list(upload_map.keys()), format_func=lambda k: upload_map[k]["filename"], key="export_select")
+        if st.button("Export Anki TSV", key="export_anki_btn"):
             conn = None
             try:
                 conn = get_db_connection()
@@ -1389,6 +1673,7 @@ def render_settings_tab():
                 st.download_button("Download Anki TSV", data=b, file_name=fname, mime="text/tab-separated-values")
     else:
         st.info("No uploads available for export.")
+
 
 # ----------------------------
 # Main entrypoint
