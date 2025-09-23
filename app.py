@@ -75,10 +75,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("slidetutor")
 
-DEFAULT_OPENROUTER_KEY = (
+# prefer Streamlit secrets, fall back to environment variable
+DEFAULT_OPENROUTER_API_KEY = (
     (st.secrets.get("OPENROUTER_API_KEY") if hasattr(st, "secrets") and st.secrets is not None else None)
     or os.getenv("OPENROUTER_API_KEY", "")
 )
+
 OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 TOP_K = int(os.getenv("TOP_K", "5"))
@@ -454,7 +456,7 @@ def parse_and_extract_content(filename, file_bytes):
 def extract_json_from_text(text):
     if not text or not isinstance(text, str):
         return None
-    m = re.search(r'\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`', text, re.IGNORECASE)
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text, re.IGNORECASE)
     candidate = None
     if m:
         candidate = m.group(1).strip()
@@ -480,7 +482,7 @@ def extract_json_from_text(text):
         if in_string:
             if escape:
                 escape = False
-            elif ch == "\\": 
+            elif ch == "\\":
                 escape = True
             elif ch == in_string:
                 in_string = False
@@ -521,61 +523,82 @@ def extract_json_from_text(text):
 # LLM / OpenRouter wrapper (defensive)
 # ----------------------------
 def call_openrouter(system_prompt, user_prompt, model="gpt-4o-mini", max_tokens=1200, temperature=0.1):
-    api_key = None
+    # resolve API key: session -> secrets/env
     try:
-        api_key = st.session_state.get("OPENROUTER_API_KEY") or DEFAULT_OPENROUTER_KEY
+        api_key = st.session_state.get("OPENROUTER_API_KEY") or DEFAULT_OPENROUTER_API_KEY
     except Exception:
         api_key = DEFAULT_OPENROUTER_API_KEY
+
     if not api_key:
-        raise RuntimeError("OpenRouter API key not configured.")
+        raise RuntimeError("OpenRouter API key not configured. Set OPENROUTER_API_KEY in Streamlit secrets or paste into Settings.")
+
     if not _HAS_REQUESTS or requests is None:
-        raise RuntimeError("requests library not available.")
+        raise RuntimeError("requests library not available. Install 'requests' to call the LLM API.")
+
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {"model": model, "messages": [{"role":"system","content":system_prompt}, {"role":"user","content":user_prompt}], "max_tokens": max_tokens, "temperature": temperature}
+    body = {
+        "model": model,
+        # prefer chat messages format (OpenRouter compatibility); keep simple chat shape
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "max_tokens": int(max_tokens or 1200),
+        "temperature": float(temperature or 0.1)
+    }
+
     try:
         resp = requests.post(OPENROUTER_API_URL, headers=headers, json=body, timeout=60)
-    except Exception as e:
-        logger.exception("Network exception when calling OpenRouter: %s", e)
-        raise RuntimeError("Network error contacting LLM: " + str(e))
-    try:
         resp.raise_for_status()
-    except Exception:
-        raw = "<no-body>"
+    except Exception as e:
+        logger.exception("Network/API error calling OpenRouter: %s", e)
+        raw = ""
         try:
-            raw = resp.text
+            raw = getattr(e, "response", None) and e.response.text or ""
         except Exception:
-            pass
-        logger.error("OpenRouter returned HTTP %s: %s", resp.status_code, raw[:1000])
-        raise RuntimeError(f"LLM API returned HTTP {resp.status_code}: {raw[:1000]}")
+            raw = ""
+        raise RuntimeError(f"LLM API call failed: {e}\n{raw}") from e
+
     try:
         data = resp.json()
     except Exception:
-        logger.exception("Failed to parse LLM JSON response")
+        logger.exception("Failed to parse JSON from LLM response")
         raise RuntimeError("Failed to decode LLM response as JSON.")
+
+    # Extract content from different possible shapes
     content = None
     try:
         choices = data.get("choices")
         if choices and isinstance(choices, list) and len(choices) > 0:
             first = choices[0]
             if isinstance(first, dict):
+                # typical chat shape: message.content
                 msg = first.get("message") or {}
                 content = msg.get("content") or first.get("text") or first.get("message", {}).get("content")
         if not content:
+            # fallback shapes
             if "output" in data:
                 content = data["output"]
             elif "result" in data:
                 content = data["result"]
+            elif "text" in data:
+                content = data["text"]
     except Exception:
         content = None
+
     if not content:
         logger.error("LLM missing expected fields; response truncated: %s", str(data)[:2000])
-        raise RuntimeError("LLM response missing expected content.")
+        raise RuntimeError("LLM response missing expected content. See logs.")
+
+    # ensure string
     if not isinstance(content, str):
         try:
             content = json.dumps(content)
         except Exception:
             content = str(content)
+
     return content.strip()
+
 
 # ----------------------------
 # Content generation wrappers (enhanced, more robust prompts)
@@ -583,7 +606,7 @@ def call_openrouter(system_prompt, user_prompt, model="gpt-4o-mini", max_tokens=
 
 # NOTE:
 # - Prompts request both a human-readable Markdown section (for display)
-#   and a strict JSON payload wrapped in triple-backticks (\`\`\`json ... \`\`\`)
+#   and a strict JSON payload wrapped in triple-backticks (```json ... ```)
 #   so your UI can render the Markdown and your code can reliably parse the JSON.
 # - Each prompt gives precise output schema, length limits, and safety instructions
 #   (e.g., say "CANNOT_ANSWER" if the information isn't present).
@@ -594,7 +617,7 @@ PROMPT_LESSON_MULTILEVEL = (
     "TASK: Create a *multi-level lesson* from the provided TEXT. Produce TWO output parts:\n\n"
     "1) A human-friendly MARKDOWN lesson (suitable for immediate display). Structure it clearly with headings\n"
     "   and short paragraphs. Include examples and tips so a student can learn from it.\n\n"
-    "2) A strict JSON summary wrapped in triple-backticks labeled as \`\`\`json\`\`\` (so it can be parsed).\n"
+    "2) A strict JSON summary wrapped in triple-backticks labeled as ```json``` (so it can be parsed).\n"
     "   The JSON object MUST follow this schema exactly:\n"
     "   {\n"
     "     \"title\": string,                # short title (<= 80 chars)\n"
@@ -624,7 +647,7 @@ PROMPT_LESSON_MULTILEVEL = (
 PROMPT_MCQ_JSON = (
     "You are an AI that reliably generates high-quality multiple-choice questions (MCQs).\n\n"
     "TASK: From the provided TEXT, create the requested number of MCQs. Reply ONLY with a valid JSON array\n"
-    "wrapped in triple-backticks labeled \`\`\`json\`\`\` so it can be parsed. The array should contain objects with the\n"
+    "wrapped in triple-backticks labeled ```json``` so it can be parsed. The array should contain objects with the\n"
     "following keys (strict):\n\n"
     "  {\n"
     "    \"question\": string,             # concise stem (<= 200 chars)\n"
@@ -644,12 +667,12 @@ PROMPT_MCQ_JSON = (
     "- Try to vary difficulty: label at least one question as 'easy', one 'medium', and one 'hard' in the explanation if multiple are\n"
     "  requested.\n"
     "- Do not include any additional fields outside the schema. The response MUST be valid JSON.\n\n"
-    "OUTPUT: Only the JSON array in a \`\`\`json\`\`\` block."
+    "OUTPUT: Only the JSON array in a ```json``` block."
 )
 
 PROMPT_FLASHCARDS_JSON = (
     "You are an AI that extracts clear, concise flashcards from the provided TEXT.\n\n"
-    "TASK: Return a JSON array (wrapped in \`\`\`json\`\`\`) of flashcard objects with this exact schema:\n\n"
+    "TASK: Return a JSON array (wrapped in ```json```) of flashcard objects with this exact schema:\n\n"
     "  [\n"
     "    {\n"
     "      \"question\": string,   # short, focused prompt (<= 160 chars)\n"
@@ -664,7 +687,7 @@ PROMPT_FLASHCARDS_JSON = (
     "- If the TEXT lacks enough info, produce as many valid flashcards as possible and stop.\n"
     "- No more than 50 flashcards at once unless explicitly requested.\n"
     "- Language should match the input TEXT.\n\n"
-    "OUTPUT: Only the JSON array wrapped in \`\`\`json\`\`\`; do not include extra commentary."
+    "OUTPUT: Only the JSON array wrapped in ```json```; do not include extra commentary."
 )
 
 
@@ -1159,12 +1182,13 @@ def answer_question_with_rag_safe(query, indexed_uploads, top_k=None):
 APP_CSS = """
 :root{
   /* theme tokens */
-  --bg-0: #0B1220;
-  --bg-1: #0E1628;
+  --bg-0: #051022;
+  --bg-1: #061428;
   --panel: rgba(255,255,255,0.02);
   --muted: #9AA6B2;
   --text: #E6F0FA;
-  --brand: #2B6EF2; /* primary brand color */
+  --accent-1: #6C5CE7;
+  --accent-2: #4b2bd0;
   --radius: 12px;
   --shadow-soft: 0 8px 36px rgba(2,6,12,0.55);
   --max-width: 1180px;
@@ -1176,7 +1200,7 @@ APP_CSS = """
 /* GLOBAL */
 html, body, .stApp {
   min-height: 100%;
-  background: var(--bg-0);
+  background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
   color: var(--text);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -1205,7 +1229,7 @@ html, body, .stApp {
 
 /* CARD (reusable) */
 .card {
-  background: rgba(255,255,255,0.014);
+  background: linear-gradient(180deg, rgba(255,255,255,0.014), rgba(255,255,255,0.008));
   border-radius: var(--radius);
   padding: 18px;
   margin-bottom: 18px;
@@ -1232,7 +1256,7 @@ html, body, .stApp {
   border-radius:12px;
   display:inline-grid;
   place-items:center;
-  background: rgba(255,255,255,0.02);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   font-size:1.4rem;
 }
 .app-title {
@@ -1252,14 +1276,14 @@ html, body, .stApp {
   overflow-wrap:break-word;
 }
 
-/* HERO block */
+/* HERO block - balanced horizontal & vertical spacing */
 .hero {
   display:flex;
   gap:22px;
   align-items:center;
   padding:20px;
   border-radius:14px;
-  background: var(--bg-panel);
+  background: linear-gradient(90deg, rgba(76,58,199,0.06), rgba(75,43,208,0.03));
   border: 1px solid rgba(255,255,255,0.02);
   align-items:flex-start;
 }
@@ -1329,14 +1353,14 @@ html, body, .stApp {
 .stButton>button {
   border-radius:12px !important;
   padding:10px 16px !important;
-  background: var(--brand) !important;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2)) !important;
   color:#fff !important;
   border:none !important;
-  box-shadow:0 10px 28px rgba(43,110,242,0.18);
+  box-shadow:0 10px 28px rgba(77,92,230,0.12);
   white-space: nowrap;
   transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
-.stButton>button:hover { transform: translateY(-3px); box-shadow:0 18px 40px rgba(43,110,242,0.24); }
+.stButton>button:hover { transform: translateY(-3px); box-shadow:0 18px 40px rgba(77,92,230,0.14); }
 .stButton>button:active { transform: translateY(-1px); }
 
 /* Inputs */
@@ -1355,14 +1379,851 @@ textarea, input, .stTextInput, .stTextArea {
 
 /* Make long text wrap cleanly */
 * { word-wrap: break-word; }
+
+/* Horizontal layout helpers (avoid side-cropping) */
+.page-row {
+  display:flex;
+  gap:24px;
+  align-items:flex-start;
+  width:100%;
+  box-sizing:border-box;
+}
+.page-col { flex:1; min-width:220px; }
+
+/* Card grid: responsive columns */
+.grid-4 { display:grid; grid-template-columns: repeat(4, 1fr); gap:16px; }
+.grid-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; }
+.grid-2 { display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }
+@media (max-width: 1100px) {
+  .grid-4, .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .hero-right { display:none; }
+  .app-title { font-size:1.35rem; max-width:100%; }
+  .app-sub { font-size:0.95rem; max-width:100%; }
+  .stApp .block-container { padding: calc(var(--top-offset) - 16px) 20px 20px !important; }
+}
+@media (max-width: 720px) {
+  .grid-2 { grid-template-columns: repeat(1, 1fr); }
+  .hero { flex-direction:column; gap:12px; align-items:flex-start; }
+  :root { --top-offset: 64px; --side-gutter: 16px; }
+  .stApp .block-container { padding: calc(var(--top-offset) - 20px) 14px 14px !important; }
+}
+
+/* safety: ensure block-container box-sizing override (avoid collisions) */
+.stApp .block-container, .block-container { box-sizing: border-box; }
 """
+
+
+
+
+def initialize_session_state_defaults():
+    defaults = {
+        "uploads": [],
+        "OPENROUTER_API_KEY": DEFAULT_OPENROUTER_KEY,
+        "chat_history": [],
+        "due_cards": [],
+        "current_card_idx": 0,
+        "active_upload_idx": None,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+def render_header():
+    try:
+        st.markdown(f"<div style='display:flex;align-items:center;gap:12px;margin-bottom:12px'>"
+                    f"<div style='font-size:2.2rem'>🎓</div>"
+                    f"<div><div style='font-weight:700;font-size:1.4rem'>{APP_TITLE}</div>"
+                    f"<div class='small-muted'>{APP_SUBTITLE}</div></div></div>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
+def render_home():
+    """
+    Clean, non-duplicating home/hero UI:
+    - DOES NOT render the global header/logo (render_header() already does that)
+    - Uses compact hero, metrics column, CTA buttons, and expanders to avoid congestion
+    """
+    try:
+        uploads = st.session_state.get("uploads", []) or []
+        total_uploads = len(uploads)
+        total_slides = sum(int(u.get("slide_count", 0) or 0) for u in uploads)
+        fc_db = st.session_state.get("flashcards_db", {})
+        total_flashcards = sum(len(v) for v in fc_db.values()) if isinstance(fc_db, dict) else 0
+
+        # HERO (compact — no duplicate logo/title)
+        st.markdown("<div class='card hero'>", unsafe_allow_html=True)
+        left, right = st.columns([2, 1])
+        with left:
+            st.markdown("<h2 style='margin:0 0 8px 0;'>Learn faster from slides — smart, visual, practical.</h2>", unsafe_allow_html=True)
+            st.markdown("<div class='small-muted' style='margin-bottom:12px'>Upload PDFs/PPTX, extract text & images, build semantic indexes for RAG Q&A, auto-generate lessons, quizzes & flashcards, and practice with SM-2.</div>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns([1,1,1])
+            if c1.button("Upload files", key="home_cta_upload"):
+                st.session_state["_navigate_to"] = "Upload"
+                safe_rerun()
+            if c2.button("Try Chat Q&A", key="home_cta_chat"):
+                st.session_state["_navigate_to"] = "Chat Q&A"
+                safe_rerun()
+            if c3.button("Generate Lesson", key="home_cta_lesson"):
+                st.session_state["_navigate_to"] = "Lessons"
+                safe_rerun()
+        with right:
+            # compact metrics (stacked)
+            try:
+                st.markdown("<div style='display:flex;flex-direction:column;gap:6px;align-items:flex-start'>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:0.9rem;color:var(--muted)'>Uploads</div><div style='font-size:1.6rem;font-weight:700'>{total_uploads}</div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:0.9rem;color:var(--muted)'>Slides parsed</div><div style='font-size:1.6rem;font-weight:700'>{total_slides}</div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:0.9rem;color:var(--muted)'>Flashcards</div><div style='font-size:1.6rem;font-weight:700'>{total_flashcards}</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+            except Exception:
+                st.metric("Uploads", total_uploads)
+                st.metric("Slides parsed", total_slides)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Recent uploads expander (hidden by default to reduce congestion)
+        with st.expander("Recent uploads & preview", expanded=False):
+            if not uploads:
+                st.markdown("<div class='small-muted'>No uploads yet — go to Upload tab.</div>", unsafe_allow_html=True)
+            else:
+                for up in reversed(uploads[-3:]):
+                    st.markdown(f"**{up.get('filename','(file)')}** — slides: {up.get('slide_count',0)}")
+                    slides = up.get("slides_data") or []
+                    if slides:
+                        s0 = slides[0]
+                        imgs = s0.get("images") or []
+                        if imgs:
+                            try:
+                                st.image(io.BytesIO(imgs[0]), width=260)
+                            except Exception:
+                                pass
+                        if s0.get("text"):
+                            st.write(s0.get("text")[:800] + ("..." if len(s0.get("text","")) > 800 else ""))
+                    st.markdown("---")
+
+        # Features as a compact grid (collapsed details inside expanders to avoid clutter)
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### What you can do")
+        cols = st.columns([1,1,1,1])
+        cols[0].markdown("**Extract**\n\n<div class='small-muted'>Text, images, OCR from slides</div>", unsafe_allow_html=True)
+        cols[1].markdown("**Index**\n\n<div class='small-muted'>Build embeddings for semantic search</div>", unsafe_allow_html=True)
+        cols[2].markdown("**Generate**\n\n<div class='small-muted'>Lessons, MCQs, flashcards</div>", unsafe_allow_html=True)
+        cols[3].markdown("**Practice**\n\n<div class='small-muted'>SM-2 spaced repetition & Anki export</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Quick actions: act on a selected upload (kept small)
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### Quick actions")
+        if uploads:
+            sel_name = st.selectbox("Choose upload", [u["filename"] for u in uploads], key="home_quick_select")
+            sel_upload = next((u for u in uploads if u.get("filename") == sel_name), None)
+            b1, b2, b3 = st.columns([1,1,1])
+            if b1.button("Build Index", key=f"home_build_{_sanitize_key(sel_name)}"):
+                try:
+                    build_vector_index_safe(sel_upload, force=False)
+                    st.success(sel_upload.get("status_msg","Index attempted"))
+                    safe_rerun()
+                except Exception:
+                    st.error("Index build failed. Check logs.")
+            if b2.button("Preview slides", key=f"home_preview_{_sanitize_key(sel_name)}"):
+                try:
+                    if sel_upload:
+                        for s in sel_upload.get("slides_data", [])[:4]:
+                            st.markdown(f"**Slide {s.get('index',0)+1}**")
+                            if s.get("images"):
+                                for img in s.get("images")[:1]:
+                                    st.image(io.BytesIO(img), width=260)
+                            if s.get("text"):
+                                st.write(s.get("text")[:600])
+                            st.markdown("---")
+                    else:
+                        st.info("No slides to preview.")
+                except Exception:
+                    st.error("Preview failed.")
+            if b3.button("Generate 10 flashcards", key=f"home_genfc_{_sanitize_key(sel_name)}"):
+                try:
+                    cards = generate_flashcards_from_text(sel_upload.get("full_text",""), n=10)
+                    saved = add_flashcards_to_db_safe(sel_upload, cards)
+                    st.success(f"Saved {saved} flashcards")
+                except Exception:
+                    st.error("Flashcard gen failed.")
+        else:
+            st.markdown("<div class='small-muted'>No uploads — use the Upload tab to add files.</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # small footer hint
+        st.markdown("<div class='small-muted' style='margin-top:8px'>Tip: expand 'Recent uploads' to preview slides; use quick actions for common tasks.</div>", unsafe_allow_html=True)
+
+    except Exception as e:
+        logger.exception("render_home failed: %s", e)
+        st.markdown(f"### {APP_TITLE} — {APP_SUBTITLE}")
+        st.markdown("Upload PDFs or PPTX and explore features in the tabs above.")
+
+
+
+def render_upload_tab():
+    st.header("Upload & Process")
+    st.markdown("<div class='card'>Upload PPTX or PDF files. Then process to extract text & OCR, optionally build embeddings (if available).</div>", unsafe_allow_html=True)
+
+    auto_index = st.checkbox("Auto-build index after upload (attempt)", value=True, key="auto_build_index_opt")
+    uploaded_files = st.file_uploader("PPTX / PDF — multiple", type=["pptx", "pdf"], accept_multiple_files=True, key="uploader")
+
+    if uploaded_files:
+        existing = {u["filename"] for u in st.session_state.uploads}
+        for f in uploaded_files:
+            if f.name not in existing:
+                up = process_new_upload_safe(f)
+                st.session_state.uploads.append(up)
+                st.success(f"Added: {f.name}")
+                # auto-build optionally
+                if auto_index:
+                    try:
+                        build_vector_index_safe(up)
+                        st.info(up.get("status_msg", "Index attempted"))
+                    except Exception:
+                        logger.exception("Auto index failed")
+                safe_rerun()
+
+    if not st.session_state.uploads:
+        st.info("No uploads yet. Use the uploader above.")
+        return
+
+    for i, up in enumerate(list(st.session_state.uploads)):
+        with st.expander(f"{up['filename']} — {up.get('status_msg','Ready')}", expanded=False):
+            cols = st.columns([3,1,1])
+            cols[0].markdown(f"**Slides:** {up.get('slide_count',0)}  —  **Chunks:** {len(up.get('chunks',[]))}")
+            if cols[1].button("Build Index", key=f"build_{_sanitize_key(up['filename'])}", disabled=bool(up.get("index_built", False))):
+                build_vector_index_safe(up)
+                st.success(up.get("status_msg"))
+                safe_rerun()
+            if cols[2].button("Select", key=f"select_{_sanitize_key(up['filename'])}"):
+                st.session_state.active_upload_idx = i
+                st.success("Selected for operations")
+                safe_rerun()
+
+            # show file preview (images first)
+            if up.get("slides_data"):
+                if st.button("Preview (first 10 slides as images)", key=f"preview_img_{_sanitize_key(up['filename'])}"):
+                    for s in up.get("slides_data", [])[:10]:
+                        st.markdown(f"**Slide {s['index']+1}**")
+                        imgs = s.get("images") or []
+                        if imgs:
+                            # show up to 3 images as thumbnails
+                            imgs_to_show = imgs[:3]
+                            cols2 = st.columns(len(imgs_to_show))
+                            for c_idx, img_bytes in enumerate(imgs_to_show):
+                                try:
+                                    cols2[c_idx].image(io.BytesIO(img_bytes), width=220, use_container_width=False)
+                                except Exception:
+                                    try:
+                                        cols2[c_idx].write("Image preview not available")
+                                    except Exception:
+                                        pass
+                        else:
+                            # fallback to text / OCR
+                            if s.get("text"):
+                                st.write(s["text"])
+                            if s.get("ocr_text"):
+                                st.caption("OCR text:")
+                                st.write(s["ocr_text"])
+                        st.markdown("---")
+
+            # delete action
+            if st.button("Delete upload", key=f"del_{_sanitize_key(up['filename'])}"):
+                try:
+                    dbid = up.get("db_id")
+                    if dbid:
+                        try:
+                            conn = get_db_connection()
+                            with conn:
+                                conn.execute("DELETE FROM uploads WHERE id = ?", (dbid,))
+                        except Exception:
+                            logger.exception("Failed deleting DB record")
+                    st.session_state.uploads = [u for u in st.session_state.uploads if u.get("filename") != up.get("filename")]
+                    st.success("Deleted upload")
+                    safe_rerun()
+                except Exception:
+                    logger.exception("Delete failed")
+                    st.error("Failed to delete upload.")
+
+
+def render_lessons_tab():
+    st.header("Generate Lesson")
+    uploads = [u for u in st.session_state.uploads if u.get("processed")]
+    if not uploads:
+        st.info("Process an upload first on the Upload tab.")
+        return
+
+    # select document
+    opts = {u["filename"]: idx for idx, u in enumerate(uploads)}
+    sel = st.selectbox("Select a processed document", list(opts.keys()))
+    up = uploads[opts[sel]]
+
+    # options for generation/display
+    col1, col2 = st.columns([1, 1])
+    show_markdown = col1.checkbox("Render LLM Markdown output (if present)", value=True)
+    show_structured = col2.checkbox("Render structured lesson (parsed JSON)", value=True)
+
+    # interactive controls
+    st.markdown("---")
+    if st.button("Generate Multi-level Lesson"):
+        with st.spinner("Generating lesson..."):
+            try:
+                raw = generate_multilevel_lesson(up.get("full_text", ""))
+            except Exception as e:
+                logger.exception("Lesson generation failed: %s", e)
+                st.error(f"Lesson generation failed: {e}")
+                return
+
+        if not raw or not str(raw).strip():
+            st.warning("LLM returned empty output.")
+            return
+
+        # Attempt to extract JSON object from the LLM output
+        parsed_json = None
+        try:
+            parsed_json = extract_json_from_text(raw)
+        except Exception:
+            parsed_json = None
+
+        # Try to isolate the markdown portion (anything outside a ```json``` block or trailing JSON)
+        md_part = str(raw)
+        try:
+            # remove triple-backtick JSON blocks if present
+            md_part = re.sub(r'```json[\s\S]*?```', '', md_part, flags=re.IGNORECASE).strip()
+            # also remove a trailing raw JSON object if present (fallback)
+            md_part = re.sub(r'\n*\{[\s\S]*\}\s*$', '', md_part).strip()
+        except Exception:
+            md_part = str(raw)
+
+        # Show helpful UI to user
+        st.success("Lesson generated (preview below).")
+
+        # Render Markdown part if requested and not empty
+        if show_markdown and md_part:
+            st.markdown("#### Lesson (LLM markdown preview)")
+            try:
+                # Use markdown first for nicer formatting, fallback to write
+                st.markdown(md_part)
+            except Exception:
+                st.write(md_part)
+            st.markdown("---")
+
+        # If we parsed a JSON object and user wants structured view, render it nicely
+        if show_structured and parsed_json and isinstance(parsed_json, dict):
+            try:
+                # Save parsed JSON in session for later use/export
+                st.session_state["last_parsed_lesson"] = parsed_json
+
+                title = parsed_json.get("title") or parsed_json.get("topic") or "Lesson"
+                st.markdown(f"### {title}")
+
+                levels = parsed_json.get("levels") or {}
+                if isinstance(levels, dict) and levels:
+                    # show level cards horizontally where space permits
+                    level_keys = list(levels.keys())
+                    # create responsive columns (up to 3)
+                    ncols = min(3, max(1, len(level_keys)))
+                    cols = st.columns(ncols)
+                    for i, lvl in enumerate(level_keys):
+                        data = levels.get(lvl) or {}
+                        c = cols[i % ncols]
+                        with c:
+                            st.markdown(f"#### {lvl}")
+                            exp = data.get("explanation") or data.get("summary") or "CANNOT_ANSWER"
+                            st.markdown(f"**Explanation:**\n\n{exp}")
+                            we = data.get("worked_example") or "CANNOT_ANSWER"
+                            st.markdown(f"**Worked example:**\n\n{we}")
+                            tips = data.get("tips") or []
+                            if tips and isinstance(tips, (list, tuple)):
+                                st.markdown("**Tips:**")
+                                for t in tips[:5]:
+                                    st.markdown(f"- {t}")
+                            else:
+                                st.markdown("**Tips:** CANNOT_ANSWER")
+                else:
+                    st.info("No structured levels found in parsed JSON.")
+
+                # Short quiz rendering
+                short_quiz = parsed_json.get("short_quiz") or parsed_json.get("quiz") or []
+                if short_quiz and isinstance(short_quiz, list):
+                    st.markdown("---")
+                    st.markdown("#### Short Quiz")
+                    for qi, item in enumerate(short_quiz):
+                        q = item.get("question") if isinstance(item, dict) else (item[0] if isinstance(item, (list, tuple)) else None)
+                        a = item.get("answer") if isinstance(item, dict) else (item[1] if isinstance(item, (list, tuple)) else None)
+                        if not q:
+                            continue
+                        card_key = f"lesson_quiz_show_{_sanitize_key(str(sel))}_{qi}"
+                        st.markdown(f"**Q{qi+1}. {q}**")
+                        if st.button("Show Answer", key=card_key):
+                            st.markdown(f"**Answer:** {a or 'CANNOT_ANSWER'}")
+                        st.markdown("---")
+                else:
+                    # no quiz found
+                    pass
+
+                # allow download of structured JSON
+                try:
+                    jbytes = json.dumps(parsed_json, indent=2, ensure_ascii=False).encode("utf-8")
+                    st.download_button("Download lesson JSON", data=jbytes, file_name=f"lesson_{_sanitize_key(title)[:32]}.json", mime="application/json")
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.exception("Rendering parsed lesson failed: %s", e)
+                st.warning("Parsed lesson exists but failed to render nicely. Showing raw JSON below.")
+                st.json(parsed_json)
+
+        else:
+            # If structured view not requested or parsing failed, show safe fallback
+            if parsed_json and not show_structured:
+                st.info("Lesson JSON parsed but structured view is disabled (enable 'Render structured lesson').")
+            elif not parsed_json:
+                st.warning("Could not parse structured JSON from the LLM response. Falling back to any markdown output (above) or raw JSON below.")
+            # as final fallback, show raw (prettified) JSON, but do not dump inline raw text
+            try:
+                parsed_try = json.loads(re.sub(r'[\r\n]+$', '', raw)) if isinstance(raw, str) and raw.strip().startswith("{") else None
+            except Exception:
+                parsed_try = None
+            if parsed_try:
+                st.json(parsed_try)
+            else:
+                # last resort: attempt to pretty-print any JSON-like substring
+                j = extract_json_from_text(raw)
+                if j:
+                    st.json(j)
+                else:
+                    # show a compact preview to avoid cluttering UI with a huge raw blob
+                    st.markdown("#### Raw LLM output (preview)")
+                    st.text(raw[:4000] + ("..." if len(raw) > 4000 else ""))
+
+    # End generate button handling
+
+    # If user has a previously parsed lesson in session, allow them to re-open it
+    if st.session_state.get("last_parsed_lesson") and st.checkbox("Show last parsed lesson from this session", value=False):
+        pj = st.session_state.get("last_parsed_lesson")
+        try:
+            st.markdown(f"### {pj.get('title','Lesson')}")
+            st.json(pj)
+        except Exception:
+            st.write(pj)
+
+
+def render_chat_tab():
+    st.header("Ask Questions (RAG)")
+    indexed = [u for u in st.session_state.uploads if u.get("index_built")]
+    if not indexed:
+        st.warning("No indexed uploads. Build an index on the Upload tab to enable RAG.")
+        return
+
+    opts = {u['filename']: u for u in indexed}
+    chosen = st.multiselect("Which indexed documents to search (multi-select)", list(opts.keys()), default=list(opts.keys()))
+    docs = [opts[n] for n in chosen] if chosen else indexed
+
+    with st.form("rag_form"):
+        prompt = st.text_area("Ask a question about your documents", key="rag_input_area", height=120)
+        top_k_local = st.number_input("Context chunks to retrieve (top_k)", min_value=1, max_value=20, value=TOP_K)
+        submitted = st.form_submit_button("Get answer")
+    if submitted:
+        if not prompt or not prompt.strip():
+            st.warning("Provide a question.")
+        else:
+            with st.spinner("Searching..."):
+                ans = answer_question_with_rag_safe(prompt, docs, top_k=top_k_local)
+                st.markdown("**Answer:**")
+                # prefer markdown so newlines render cleanly
+                try:
+                    st.markdown(ans)
+                except Exception:
+                    st.write(ans)
+                # show simple context snippets used (best-effort)
+                with st.expander("Context snippets used (first matches)"):
+                    snippets_shown = 0
+                    for up in docs:
+                        chunks = (up.get("chunks") or [])[:5]
+                        if not chunks:
+                            continue
+                        st.markdown(f"**{up.get('filename')}**")
+                        for c in chunks[:3]:
+                            st.write(c[:800] + ("..." if len(c) > 800 else ""))
+                            snippets_shown += 1
+                            if snippets_shown >= 6:
+                                break
+                        if snippets_shown >= 6:
+                            break
+
+
+def render_quizzes_tab():
+    st.header("Generate & Take MCQs")
+    uploads = [u for u in st.session_state.uploads if u.get("processed")]
+    if not uploads:
+        st.info("Process an upload first on the Upload tab.")
+        return
+
+    # select upload
+    opts = {u["filename"]: idx for idx, u in enumerate(uploads)}
+    sel = st.selectbox("Select document", list(opts.keys()), key="quiz_doc_select")
+    up = uploads[opts[sel]]
+
+    # generation options
+    gen_col1, gen_col2, gen_col3 = st.columns([2, 2, 1])
+    qcount = gen_col1.slider("Number of MCQs to generate", 1, 20, 5, key="gen_qcount")
+    temp_opt = gen_col2.slider("LLM temperature (lower = more deterministic)", 0.0, 1.0, 0.0, 0.1, key="gen_temp")
+    shuffle_before = gen_col3.checkbox("Shuffle questions", value=True, key="gen_shuffle")
+
+    # store latest generated mcqs in session so user can interact without re-generating
+    if "latest_generated_mcqs" not in st.session_state or st.session_state.get("latest_generated_for") != up.get("filename"):
+        st.session_state["latest_generated_mcqs"] = []
+        st.session_state["latest_generated_for"] = None
+
+    if st.button("Generate MCQs", key=f"gen_mcq_{_sanitize_key(up['filename'])}"):
+        with st.spinner("Generating MCQs from document..."):
+            try:
+                mcqs = generate_mcq_set_from_text(up.get("full_text", ""), qcount=qcount)
+            except Exception as e:
+                logger.exception("MCQ generation call failed: %s", e)
+                mcqs = []
+            if not mcqs:
+                st.warning("No MCQs returned from the model.")
+                st.session_state["latest_generated_mcqs"] = []
+                st.session_state["latest_generated_for"] = None
+            else:
+                # normalize structure and guard missing fields
+                normalized = []
+                for obj in mcqs:
+                    try:
+                        qtext = str(obj.get("question") or "").strip()
+                        options = list(obj.get("options") or [])
+                        # ensure options are strings
+                        options = [str(x) for x in options]
+                        if not options:
+                            # fallback: try to parse 'answers' or 'choices'
+                            continue
+                        answer_index = int(obj.get("answer_index", 0)) if obj.get("answer_index") is not None else 0
+                        answer_index = max(0, min(len(options) - 1, answer_index))
+                        normalized.append({"question": qtext, "options": options, "answer_index": answer_index})
+                    except Exception:
+                        continue
+                if not normalized:
+                    st.warning("MCQs returned were malformed and could not be used.")
+                    st.session_state["latest_generated_mcqs"] = []
+                    st.session_state["latest_generated_for"] = None
+                else:
+                    if shuffle_before:
+                        import random
+                        random.shuffle(normalized)
+                    st.session_state["latest_generated_mcqs"] = normalized
+                    st.session_state["latest_generated_for"] = up.get("filename")
+                    st.success(f"Generated {len(normalized)} MCQs (stored in session).")
+
+    # show generated MCQs (interactive)
+    mcqs = st.session_state.get("latest_generated_mcqs", [])
+    if mcqs:
+        st.markdown("### Preview / Take generated MCQs")
+        # create a unique namespace for radio keys so they survive reruns
+        answers = {}
+        for qi, q in enumerate(mcqs):
+            qkey = f"gen_mcq_{_sanitize_key(up['filename'])}_{qi}"
+            st.markdown(f"**Q{qi+1}. {q.get('question','(no text)')}**")
+            opts = q.get("options") or []
+            if not opts:
+                st.write("_No options for this question_")
+                continue
+            # if the saved answer_index might point to an option that gets shuffled later, we only use it for scoring
+            answers[qi] = st.radio(f"Select answer (Q{qi+1})", options=opts, key=qkey)
+            st.markdown("---")
+
+        if st.button("Submit generated answers", key=f"submit_generated_{_sanitize_key(up['filename'])}"):
+            score = 0
+            details = []
+            for qi, q in enumerate(mcqs):
+                opts = q.get("options") or []
+                correct_idx = int(q.get("answer_index", 0)) if opts else 0
+                correct_opt = opts[correct_idx] if (opts and 0 <= correct_idx < len(opts)) else (opts[0] if opts else None)
+                picked = st.session_state.get(f"gen_mcq_{_sanitize_key(up['filename'])}_{qi}")
+                ok = (picked == correct_opt)
+                if ok:
+                    score += 1
+                details.append((qi + 1, ok, correct_opt, picked))
+            st.success(f"You scored {score} / {len(mcqs)}")
+            for d in details:
+                qno, ok, correct_opt, picked = d
+                if ok:
+                    st.write(f"Q{qno}: ✅ Correct")
+                else:
+                    st.write(f"Q{qno}: ❌ Wrong — correct: **{correct_opt}**, you chose: {picked}")
+
+        # save generated MCQs to DB (grouped by upload id)
+        if st.button("Save generated MCQs to DB", key=f"save_generated_{_sanitize_key(up['filename'])}"):
+            try:
+                conn = get_db_connection()
+                now = int(time.time())
+                saved = 0
+                with conn:
+                    for obj in mcqs:
+                        qtext = obj.get("question", "")
+                        opts = obj.get("options", [])
+                        ans = int(obj.get("answer_index", 0)) if opts else 0
+                        conn.execute(
+                            "INSERT INTO quizzes (upload_id, question, options, correct_index, created_at) VALUES (?, ?, ?, ?, ?)",
+                            (str(up.get("db_id") or up.get("filename")), qtext, json.dumps(opts), ans, now)
+                        )
+                        saved += 1
+                st.success(f"Saved {saved} MCQs to DB (upload_id={up.get('db_id') or up.get('filename')}).")
+            except Exception:
+                logger.exception("Save MCQs failed")
+                st.warning("Could not save MCQs to DB. Check logs.")
+
+    # allow taking saved MCQs from DB for this upload
+    st.markdown("### Saved MCQs (from DB)")
+    try:
+        conn = get_db_connection()
+        cur = conn.execute("SELECT id, question, options, correct_index, created_at FROM quizzes WHERE upload_id = ? ORDER BY created_at DESC", (str(up.get("db_id") or up.get("filename")),))
+        saved_rows = cur.fetchall() or []
+    except Exception:
+        saved_rows = []
+    if not saved_rows:
+        st.info("No saved MCQs for this document (you can generate and save above).")
+        return
+
+    # show a compact list and option to take a subset
+    take_count = st.number_input("How many recent saved MCQs to take", min_value=1, max_value=len(saved_rows), value=min(10, len(saved_rows)), step=1, key="take_saved_count")
+    take_button = st.button("Take saved MCQs", key=f"take_saved_{_sanitize_key(up['filename'])}")
+    if take_button:
+        # prepare questions
+        selected_rows = saved_rows[:int(take_count)]
+        quiz_items = []
+        for r in selected_rows:
+            try:
+                qid = r[0]
+                qtext = r[1] or ""
+                opts = json.loads(r[2]) if r[2] else []
+                correct_index = int(r[3] or 0)
+                # sanitize
+                opts = [str(x) for x in opts] if opts else []
+                if not opts:
+                    continue
+                quiz_items.append({"db_id": qid, "question": qtext, "options": opts, "answer_index": correct_index})
+            except Exception:
+                continue
+        if not quiz_items:
+            st.warning("Saved MCQs were malformed and cannot be taken.")
+        else:
+            # store in session under a unique key then rerun to render the interactive quiz
+            st.session_state[f"taking_saved_mcqs_for_{_sanitize_key(up['filename'])}"] = quiz_items
+            safe_rerun()
+
+    # if session has quiz to take, render it
+    session_key = f"taking_saved_mcqs_for_{_sanitize_key(up['filename'])}"
+    if st.session_state.get(session_key):
+        items = st.session_state.get(session_key)
+        st.markdown(f"#### Taking {len(items)} saved MCQs from DB (upload: {up.get('filename')})")
+        user_answers = {}
+        for i, it in enumerate(items):
+            st.markdown(f"**Q{i+1}. {it.get('question','(no text)')}**")
+            user_answers[i] = st.radio(f"Choose (saved_{i})", options=it.get("options", []), key=f"saved_mcq_radio_{_sanitize_key(up['filename'])}_{i}")
+            st.markdown("---")
+        if st.button("Submit saved-quiz answers", key=f"submit_saved_{_sanitize_key(up['filename'])}"):
+            score = 0
+            details = []
+            for i, it in enumerate(items):
+                opts = it.get("options", [])
+                correct_idx = int(it.get("answer_index", 0)) if opts else 0
+                correct_opt = opts[correct_idx] if (opts and 0 <= correct_idx < len(opts)) else (opts[0] if opts else None)
+                picked = st.session_state.get(f"saved_mcq_radio_{_sanitize_key(up['filename'])}_{i}")
+                ok = (picked == correct_opt)
+                if ok:
+                    score += 1
+                details.append((i + 1, ok, correct_opt, picked))
+            st.success(f"You scored {score} / {len(items)}")
+            for d in details:
+                qno, ok, correct_opt, picked = d
+                if ok:
+                    st.write(f"Q{qno}: ✅ Correct")
+                else:
+                    st.write(f"Q{qno}: ❌ Wrong — correct: **{correct_opt}**, you chose: {picked}")
+            # clear the session quiz after completion
+            del st.session_state[session_key]
+
+def render_flashcards_tab():
+    st.header("Flashcards")
+    uploads = st.session_state.uploads
+    if not uploads:
+        st.info("Upload files first.")
+        return
+
+    sel = st.selectbox("Choose document", [u["filename"] for u in uploads], key="fc_doc_select")
+    up = next((u for u in uploads if u["filename"] == sel), None)
+    if up is None:
+        st.warning("Selected upload not found in session.")
+        return
+
+    # generation options
+    gen_cols = st.columns([2, 2, 1])
+    num_cards = gen_cols[0].number_input("Max flashcards to generate", min_value=5, max_value=200, value=20, step=5, key="fc_gen_count")
+    per_slide = gen_cols[1].slider("Max per slide (best-effort)", 1, 5, 2, key="fc_per_slide")
+    preview_only = gen_cols[2].checkbox("Preview only (don't save)", value=False, key="fc_preview_only")
+
+    if st.button("Generate Flashcards", key=f"gen_fc_{_sanitize_key(up['filename'])}"):
+        with st.spinner("Generating flashcards..."):
+            cards = generate_flashcards_from_text(up.get("full_text", ""), n=int(num_cards))
+            if not cards:
+                st.warning("No flashcards returned.")
+            else:
+                # optionally save
+                if preview_only:
+                    st.info(f"Previewing {min(len(cards), 10)} flashcards (preview-only).")
+                    for c in cards[:10]:
+                        st.markdown(f"**Q:** {c.get('question')}")
+                        st.caption(f"A: {c.get('answer')}")
+                else:
+                    saved = add_flashcards_to_db_safe(up, cards)
+                    st.success(f"Saved {saved} flashcards to DB.")
+
+    # management & practice
+    manage_col1, manage_col2 = st.columns(2)
+    if manage_col1.button("Load due cards for practice"):
+        st.session_state.due_cards = get_due_flashcards_safe()
+        st.session_state.current_card_idx = 0
+        safe_rerun()
+
+    if manage_col2.button("Preview 5 flashcards (from DB)"):
+        preview = get_due_flashcards_safe(upload=up, limit=5)
+        if preview:
+            for c in preview:
+                st.markdown(f"**Q:** {c.get('question')}")
+                st.caption(f"A: {c.get('answer')}")
+        else:
+            st.info("No flashcards to preview for this upload.")
+
+    # export
+    if st.button("Export all flashcards for this upload (Anki TSV)"):
+        uid = up.get("db_id") or up.get("filename")
+        try:
+            res = anki_export_tsv(uid, conn=get_db_connection())
+        except Exception:
+            res = anki_export_tsv(uid, conn=None)
+        if res:
+            fname, b = res
+            st.download_button("Download Anki TSV", data=b, file_name=fname, mime="text/tab-separated-values")
+        else:
+            st.warning("No flashcards found for this upload to export.")
+
+    # practice UI
+    if st.session_state.get("due_cards"):
+        render_flashcard_practice_ui()
+
+def render_flashcard_practice_ui():
+    cards = st.session_state.get("due_cards", [])
+    if not cards:
+        st.info("No due cards to practice now.")
+        return
+
+    idx = st.session_state.get("current_card_idx", 0)
+    total = len(cards)
+    if idx >= total:
+        st.success("✨ You finished all due cards in this session.")
+        st.session_state["due_cards"] = []
+        st.session_state["current_card_idx"] = 0
+        return
+
+    card = cards[idx]
+    st.markdown(f"##### Card {idx+1} of {total}")
+    st.write(card.get("question"))
+    # allow toggle answer without triggering rerun of main flow
+    show_key = f"fc_show_answer_{card.get('id')}"
+    if show_key not in st.session_state:
+        st.session_state[show_key] = False
+    if st.button("Show Answer", key=f"show_btn_{card.get('id')}"):
+        st.session_state[show_key] = True
+    if st.session_state.get(show_key):
+        st.markdown("**Answer:**")
+        st.write(card.get("answer"))
+
+    # make review buttons compact and confirm action
+    col_again, col_hard, col_good, col_easy = st.columns([1,1,1,1])
+    if col_again.button("Again", key=f"again_{card.get('id')}"):
+        update_flashcard_review_safe(card, 1)
+        st.session_state["current_card_idx"] = idx + 1
+        safe_rerun()
+    if col_hard.button("Hard", key=f"hard_{card.get('id')}"):
+        update_flashcard_review_safe(card, 3)
+        st.session_state["current_card_idx"] = idx + 1
+        safe_rerun()
+    if col_good.button("Good", key=f"good_{card.get('id')}"):
+        update_flashcard_review_safe(card, 4)
+        st.session_state["current_card_idx"] = idx + 1
+        safe_rerun()
+    if col_easy.button("Easy", key=f"easy_{card.get('id')}"):
+        update_flashcard_review_safe(card, 5)
+        st.session_state["current_card_idx"] = idx + 1
+        safe_rerun()
+
+def render_settings_tab():
+    st.header("Settings & Exports")
+    key = st.text_input("OpenRouter API Key (session only)", value=st.session_state.get("OPENROUTER_API_KEY",""), type="password")
+    if key != st.session_state.get("OPENROUTER_API_KEY"):
+        st.session_state["OPENROUTER_API_KEY"] = key
+        st.success("API key saved in session (not persisted).")
+
+    st.markdown("#### Export flashcards (Anki TSV)")
+    uploads = st.session_state.get("uploads", []) or []
+    if uploads:
+        # show user-friendly filenames via index selection (robust if filenames duplicate)
+        idx = st.selectbox("Select upload", options=list(range(len(uploads))),
+                           format_func=lambda i: uploads[i].get("filename", f"upload_{i}"),
+                           key="export_select")
+        if st.button("Export Anki TSV", key="export_anki_btn"):
+            selected = uploads[int(idx)]
+            uid = selected.get("db_id") or selected.get("filename")
+            conn = None
+            try:
+                conn = get_db_connection()
+            except Exception:
+                conn = None
+            res = anki_export_tsv(uid, conn)
+            if not res:
+                st.warning("No flashcards for selected upload.")
+            else:
+                fname, b = res
+                st.download_button("Download Anki TSV", data=b, file_name=fname, mime="text/tab-separated-values")
+    else:
+        st.info("No uploads available for export.")
+
+    st.divider()
+    st.subheader("Diagnostics")
+
+    statuses = [
+        ("OpenRouter API Key", bool(st.session_state.get("OPENROUTER_API_KEY") or DEFAULT_OPENROUTER_API_KEY)),
+        ("NumPy", _HAS_NUMPY),
+        ("Requests", _HAS_REQUESTS),
+        ("PyMuPDF (fitz)", _HAS_PYMUPDF),
+        ("python-pptx", _HAS_PPTX),
+        ("Sentence-Transformers", _HAS_SENTENCE_TRANSFORMERS),
+        ("FAISS", _HAS_FAISS),
+        ("EasyOCR", _HAS_EASYOCR),
+        ("Pillow (PIL)", _HAS_PIL),
+        ("gTTS", _HAS_GTTS),
+    ]
+    cols = st.columns(3)
+    for i, (name, ok) in enumerate(statuses):
+        with cols[i % 3]:
+            st.markdown(f"{'✅' if ok else '⚠️'} **{name}**")
+
+    with st.expander("Publish checklist"):
+        st.markdown("- Add OPENROUTER_API_KEY to Streamlit secrets (or paste it above for session use).")
+        st.markdown("- Optional: install extras you need (PyMuPDF for PDFs, python-pptx for PPTX, EasyOCR for image OCR, gTTS for audio).")
+        st.markdown("- Run locally with: `streamlit run app.py` and verify Diagnostics are green.")
+        st.markdown("- Deploy to Streamlit Community Cloud or your container platform; this app uses no top-level imports, easing cold starts.")
+
 
 # ----------------------------
 # Main entrypoint
 # ----------------------------
 def main():
     try:
-        st.set_page_config(page_title=APP_TITLE, page_icon="📘", layout="wide", initial_sidebar_state="expanded")
+        st.set_page_config(page_title=APP_TITLE, layout="wide", initial_sidebar_state="expanded")
     except Exception:
         pass
     initialize_session_state_defaults()
@@ -1389,55 +2250,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-def render_settings_tab():
-    st.header("Settings & Exports")
-    key = st.text_input("OpenRouter API Key (session only)", value=st.session_state.get("OPENROUTER_API_KEY",""), type="password")
-    if key != st.session_state.get("OPENROUTER_API_KEY"):
-        st.session_state["OPENROUTER_API_KEY"] = key
-        st.success("API key saved in session (not persisted).")
-
-    st.markdown("#### Export flashcards (Anki TSV)")
-    upload_map = { (u.get("db_id") or u.get("filename")): u for u in st.session_state.uploads }
-    if upload_map:
-        sel_key = st.selectbox("Select upload", options=list(upload_map.keys()), format_func=lambda k: upload_map[k]["filename"], key="export_select")
-        if st.button("Export Anki TSV", key="export_anki_btn"):
-            conn = None
-            try:
-                conn = get_db_connection()
-            except Exception:
-                conn = None
-            res = anki_export_tsv(sel_key, conn)
-            if not res:
-                st.warning("No flashcards for selected upload.")
-            else:
-                fname, b = res
-                st.download_button("Download Anki TSV", data=b, file_name=fname, mime="text/tab-separated-values")
-    else:
-        st.info("No uploads available for export.")
-
-    st.divider()
-    st.subheader("Diagnostics")
-
-    statuses = [
-        ("OpenRouter API Key", bool(st.session_state.get("OPENROUTER_API_KEY") or DEFAULT_OPENROUTER_KEY)),
-        ("NumPy", _HAS_NUMPY),
-        ("Requests", _HAS_REQUESTS),
-        ("PyMuPDF (fitz)", _HAS_PYMUPDF),
-        ("python-pptx", _HAS_PPTX),
-        ("Sentence-Transformers", _HAS_SENTENCE_TRANSFORMERS),
-        ("FAISS", _HAS_FAISS),
-        ("EasyOCR", _HAS_EASYOCR),
-        ("Pillow (PIL)", _HAS_PIL),
-        ("gTTS", _HAS_GTTS),
-    ]
-    cols = st.columns(3)
-    for i, (name, ok) in enumerate(statuses):
-        with cols[i % 3]:
-            st.markdown(f"{'✅' if ok else '⚠️'} **{name}**")
-
-    with st.expander("Publish checklist"):
-        st.markdown("- Add OPENROUTER_API_KEY to Streamlit secrets (or paste it above for session use).")
-        st.markdown("- Optional: install extras you need (PyMuPDF for PDFs, python-pptx for PPTX, EasyOCR for image OCR, gTTS for audio).")
-        st.markdown("- Run locally with: `streamlit run app.py` and verify Diagnostics are green.")
-        st.markdown("- Deploy to Streamlit Community Cloud or your container platform; this app uses no top-level imports, easing cold starts.")
