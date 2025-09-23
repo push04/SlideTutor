@@ -1,0 +1,56 @@
+# Streamlit UI Kit — Quick Start
+
+This kit gives you:
+- A clean, professional theme (3–5 colors, high contrast, no purple)
+- Reusable helpers: header, hero, KPIs, cards, chat bubbles, alerts, pagination, upload panel, button rows
+- Zero external dependencies, pure Streamlit + HTML/CSS
+
+## 1) Add the file
+Copy `scripts/streamlit_ui_kit.py` into the same folder as your Streamlit app (e.g., `ui_kit.py`) or keep it under `scripts/` and adjust the name accordingly.
+
+## 2) Use dynamic import (no top-level imports)
+Your app avoids top-level imports. Use this inline-safe pattern:
+
+\`\`\`python
+# inside your Streamlit file, near the top (after st is available)
+_ui_mod, _ok = None, False
+try:
+    _ui_mod = __import__("ui_kit")  # if you renamed, match the filename without .py
+    _ok = True
+except Exception:
+    _ui_mod, _ok = None, False
+
+if _ok and _ui_mod is not None:
+    try:
+        _ui_mod.apply_theme(st)
+        _ui_mod.header(st, title="SlideTutor AI", subtitle="Beautiful • Simple • Smart — Learn from slides quickly.", icon="🎓")
+        clicked = _ui_mod.hero(
+            st,
+            title="Learn faster from slides — smart, visual, practical.",
+            subtitle="Upload PDFs/PPTX, index for semantic search, generate lessons & quizzes, and practice flashcards with SM-2.",
+            actions=[("Upload files", "upload"), ("Try Chat Q&A", "chat"), ("Generate Lesson", "lesson")],
+        )
+        # Handle clicks via session state or navigation flags as your app already does.
+    except Exception:
+        pass
+\`\`\`
+
+If you prefer to avoid importing completely, you can copy the `THEME_CSS` string and the specific functions you want directly into your file.
+
+## 3) Components you can use
+- `apply_theme(st)` — inject CSS once per page
+- `header(st, title, subtitle=None, icon="🎓")`
+- `hero(st, title, subtitle, actions=[("Label","key"), ...]) -> Optional[str]`
+- `kpis(st, [("Uploads", "12"), ("Slides parsed", "215"), ("Flashcards", "98")])`
+- `section(st, "Quick actions", "Short description")`
+- `card_md(st, title="Title", md="Your markdown")`
+- `chat_message(st, "Hello", role="assistant")`
+- `button_row(st, [("Build Index", "build"), ("Create Quiz","quiz")]) -> Optional[str]`
+- `alert(st, "info" | "success" | "warning" | "error", "Message")`
+- `uploader(st, "Upload PDFs or PPTX")`
+- `pagination(st, total=10, key_prefix="pg") -> int`
+
+## 4) Notes
+- Colors are limited to a single brand blue, one accent green, and neutrals for accessibility.
+- Buttons style Streamlit’s native `<button>` so you keep standard behavior.
+- The kit is additive; it won’t break existing Streamlit widgets and layouts.
