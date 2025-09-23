@@ -1168,8 +1168,10 @@ APP_CSS = """
   --radius: 12px;
   --shadow-soft: 0 8px 24px rgba(2,6,12,0.55);
   --max-width: 1180px;
+  --top-offset: 84px; /* safe default to avoid Streamlit top bar overlap */
 }
 
+/* Global page */
 html, body, .stApp {
   min-height: 100%;
   background: linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
@@ -1178,45 +1180,121 @@ html, body, .stApp {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.45;
+  box-sizing: border-box;
 }
 
-/* container */
-.block-container { padding: 28px 32px !important; max-width: var(--max-width); margin: 0 auto; }
+/* Main container - increased top padding so header isn't overlapped by Streamlit chrome */
+.stApp .block-container {
+  padding: calc(var(--top-offset)) 28px 32px !important;
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
 
-/* cards */
+/* Cards */
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.016), rgba(255,255,255,0.008));
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: 18px;
+  margin-bottom: 18px;
   border: 1px solid rgba(255,255,255,0.03);
   box-shadow: var(--shadow-soft);
+  overflow: visible;
 }
 
+/* Header / hero area */
+.app-header {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+  position:relative;
+  z-index: 50; /* keep header above other elements */
+}
+.app-logo {
+  width:56px;
+  height:56px;
+  border-radius:12px;
+  display:inline-grid;
+  place-items:center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  font-size:1.4rem;
+}
+.app-title {
+  font-size:1.6rem;
+  font-weight:700;
+  margin:0;
+  line-height:1.12;
+  max-width: 68%;
+  overflow-wrap:break-word;
+  word-break:break-word;
+}
+.app-sub {
+  color:var(--muted);
+  margin:0;
+  font-size:0.98rem;
+  max-width: 68%;
+  overflow-wrap:break-word;
+}
 
+/* Hero block */
+.hero {
+  display:flex;
+  gap:20px;
+  align-items:center;
+  padding:20px;
+  border-radius:14px;
+  background: linear-gradient(90deg, rgba(76,58,199,0.06), rgba(75,43,208,0.03));
+  border: 1px solid rgba(255,255,255,0.02);
+}
+.hero-left { flex:1; min-width:240px; }
+.hero-right { width:320px; min-width:220px; }
 
-/* header */
-/* ===== header tweaks to avoid cropping/wrapping issues ===== */
-.app-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
-.app-title { font-size:1.6rem; font-weight:700; margin:0; line-height:1.15; max-width:72%; overflow-wrap:break-word; word-break:break-word; }
-.app-sub { color:var(--muted); margin:0; font-size:0.98rem; max-width:72%; overflow-wrap:break-word; }
-.block-container { padding: 20px 24px !important; max-width: var(--max-width); margin: 0 auto; }
-/* ensure the header area doesn't get visually cropped on small windows */
-.stApp .block-container > :first-child { margin-top: 6px; }
-.app-logo { width:44px; height:44px; border-radius:10px; display:inline-grid; place-items:center; background:rgba(255,255,255,0.02); }
-
-/* uploader */
-.uploader { border:1px dashed rgba(255,255,255,0.04); padding:12px; border-radius:10px; background:rgba(255,255,255,0.01); }
-.file-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.01); margin-bottom:8px; }
+/* Uploader & preview */
+.uploader {
+  border:1px dashed rgba(255,255,255,0.04);
+  padding:12px;
+  border-radius:10px;
+  background:rgba(255,255,255,0.008);
+}
+.file-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px;
+  border-radius:8px;
+  background:rgba(255,255,255,0.01);
+  margin-bottom:8px;
+  word-break: break-word;
+}
 .file-name { font-weight:600; color:var(--text); }
 .file-small { color:var(--muted); font-size:0.92rem; }
 
-/* preview */
-.preview-slide { display:flex; gap:12px; align-items:flex-start; padding:10px; border-radius:8px; background:rgba(255,255,255,0.012); border:1px solid rgba(255,255,255,0.02); }
-.slide-thumb { width:120px; height:76px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); overflow:hidden; }
+/* Slide preview */
+.preview-slide {
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  padding:10px;
+  border-radius:8px;
+  background:rgba(255,255,255,0.012);
+  border:1px solid rgba(255,255,255,0.02);
+  overflow:hidden;
+}
+.slide-thumb {
+  width:140px;
+  height:84px;
+  border-radius:8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--muted);
+  overflow:hidden;
+}
 .slide-text { font-size:0.95rem; color:var(--text); }
 
-/* primary button */
+/* Buttons & inputs */
 .stButton>button {
   border-radius:10px !important;
   padding:8px 14px !important;
@@ -1224,24 +1302,50 @@ html, body, .stApp {
   color:#fff !important;
   border:none !important;
   box-shadow:0 6px 18px rgba(77,92,230,0.12);
+  white-space: nowrap;
 }
-
-/* inputs */
 textarea, input, .stTextInput, .stTextArea {
   border-radius:10px !important;
   border:1px solid rgba(255,255,255,0.03) !important;
   background: rgba(255,255,255,0.008) !important;
   padding:10px !important;
   color:var(--text) !important;
+  box-sizing: border-box;
 }
 
-/* small helpers */
+/* Small helpers */
 .small-muted { color:var(--muted); font-size:0.92rem; }
-.kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:3px 6px; font-weight:600; font-size:0.85rem; color:var(--muted); }
+.kbd { background: rgba(255,255,255,0.02); border-radius:6px; padding:4px 8px; font-weight:600; font-size:0.85rem; color:var(--muted); }
+
+/* Metrics and thumbnails */
+.stMetric { margin-bottom: 6px; }
+
+/* Make long text wrap cleanly in narrow elements */
+* { word-wrap: break-word; }
+
+/* Responsive adjustments to avoid congestion / cropping on small screens */
+@media (max-width: 1100px) {
+  .app-title { font-size:1.35rem; max-width: 100%; }
+  .app-sub { font-size:0.95rem; max-width: 100%; }
+  .hero-right { display:none; } /* hide right column on narrow widths to reduce clutter */
+  .stApp .block-container { padding: 64px 18px 20px !important; }
+}
+@media (max-width: 600px) {
+  :root { --top-offset: 64px; } /* reduce top offset on mobile */
+  .app-logo { width:44px; height:44px; }
+  .app-title { font-size:1.15rem; }
+  .card { padding:12px; }
+  .stApp .block-container { padding: 56px 12px 16px !important; }
+  .slide-thumb { width:110px; height:64px; }
+  .stButton>button { padding:8px 10px !important; }
+}
+
+/* Safety: prevent duplicate .block-container definitions from colliding (keeps later rules authoritative) */
+.stApp .block-container, .block-container {
+  box-sizing: border-box;
+}
 """
 
-APP_TITLE = "SlideTutor"
-APP_SUBTITLE = "Your elegant study companion"
 
 
 def initialize_session_state_defaults():
@@ -1267,11 +1371,179 @@ def render_header():
         pass
 
 def render_home():
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("### Welcome to SlideTutor — your elegant study companion")
-    st.markdown("<p class='small-muted'>Upload PDFs or PPTX, extract content, build semantic indexes, generate lessons, quizzes and flashcards, and practice with SM-2.</p>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("<div class='card'>Quick tips:<ul><li>Upload files in Upload tab</li><li>Process & build index to enable RAG Q&A</li><li>Generate flashcards and practice them in Flashcards tab</li></ul></div>", unsafe_allow_html=True)
+    """
+    Polished home / hero UI.
+    Replace original render_home with this function body.
+    """
+    try:
+        uploads = st.session_state.get("uploads", []) or []
+        total_uploads = len(uploads)
+        total_slides = sum(int(u.get("slide_count", 0) or 0) for u in uploads)
+        # flashcards count (session fallback)
+        fc_db = st.session_state.get("flashcards_db", {})
+        total_flashcards = sum(len(v) for v in fc_db.values()) if isinstance(fc_db, dict) else 0
+
+        # HERO
+        st.markdown("<div class='card hero'>", unsafe_allow_html=True)
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            # header block (logo + title)
+            st.markdown(
+                f"<div class='app-header'>"
+                f"<div class='app-logo'>🎓</div>"
+                f"<div><div class='app-title'>{APP_TITLE}</div>"
+                f"<div class='app-sub'>{APP_SUBTITLE}</div></div></div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("### Learn faster from slides — smart, visual, and practical.")
+            st.markdown(
+                "<p class='small-muted'>Upload PDFs / PPTX, extract text & images, build semantic indexes for RAG Q&A, "
+                "auto-generate lessons, quizzes & flashcards, and practice with SM-2 spaced repetition.</p>",
+                unsafe_allow_html=True,
+            )
+            # CTAs
+            cta_col1, cta_col2, cta_col3 = st.columns([1,1,1])
+            if cta_col1.button("Upload files", key="home_cta_upload"):
+                st.session_state["_navigate_to"] = "Upload"
+                safe_rerun()
+            if cta_col2.button("Try Chat Q&A", key="home_cta_chat"):
+                st.session_state["_navigate_to"] = "Chat Q&A"
+                safe_rerun()
+            if cta_col3.button("Generate Lesson", key="home_cta_lesson"):
+                st.session_state["_navigate_to"] = "Lessons"
+                safe_rerun()
+
+        with col_right:
+            # metrics
+            try:
+                st.metric("Uploads", total_uploads)
+                st.metric("Slides parsed", total_slides)
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                st.metric("Flashcards", total_flashcards)
+            except Exception:
+                # fallback small text
+                st.markdown(f"**Uploads:** {total_uploads}  •  **Slides:** {total_slides}  •  **Flashcards:** {total_flashcards}")
+
+            # recent uploads thumbnails (up to 3)
+            recent = uploads[-3:] if uploads else []
+            if recent:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                st.markdown("**Recent uploads**")
+                for up in reversed(recent):
+                    try:
+                        slides = up.get("slides_data") or []
+                        thumb_bytes = None
+                        if slides:
+                            # find first available image across the slides
+                            for s in slides:
+                                imgs = s.get("images") or []
+                                if imgs:
+                                    thumb_bytes = imgs[0]
+                                    break
+                        if thumb_bytes:
+                            try:
+                                st.image(io.BytesIO(thumb_bytes), width=260)
+                            except Exception:
+                                st.markdown(f"**{up.get('filename')}**")
+                        else:
+                            # fallback card with filename
+                            st.markdown(f"**{up.get('filename')}**")
+                    except Exception:
+                        st.markdown(f"**{up.get('filename','(file)')}**")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Features / Quick tips area
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### What you can do")
+        st.markdown(
+            "<div style='display:flex;gap:18px;flex-wrap:wrap'>"
+            "<div style='flex:1;min-width:220px'><strong>Extract</strong><div class='small-muted'>Text, images, OCR from slides</div></div>"
+            "<div style='flex:1;min-width:220px'><strong>Index</strong><div class='small-muted'>Build embeddings for semantic search</div></div>"
+            "<div style='flex:1;min-width:220px'><strong>Generate</strong><div class='small-muted'>Lessons, MCQs and flashcards</div></div>"
+            "<div style='flex:1;min-width:220px'><strong>Practice</strong><div class='small-muted'>SM-2 spaced repetition & Anki export</div></div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Quick actions (operate on a selected upload)
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### Quick actions")
+        uploads_names = [u["filename"] for u in uploads] if uploads else []
+        if uploads_names:
+            sel = st.selectbox("Select an upload to act on", uploads_names, key="home_quick_select")
+            selected_upload = next((u for u in uploads if u.get("filename") == sel), None)
+            btn_col1, btn_col2, btn_col3 = st.columns([1,1,1])
+            # Build Index
+            if btn_col1.button("Build Index", key=f"home_build_{_sanitize_key(sel)}"):
+                try:
+                    if selected_upload:
+                        build_vector_index_safe(selected_upload, force=False)
+                        st.success(selected_upload.get("status_msg", "Index build attempted"))
+                        safe_rerun()
+                    else:
+                        st.warning("No upload selected.")
+                except Exception as e:
+                    logger.exception("Home quick action - build index failed: %s", e)
+                    st.error("Index build failed. Check logs.")
+            # Preview
+            if btn_col2.button("Preview (first slides)", key=f"home_preview_{_sanitize_key(sel)}"):
+                try:
+                    if selected_upload and selected_upload.get("slides_data"):
+                        for s in selected_upload.get("slides_data", [])[:6]:
+                            st.markdown(f"**Slide {s.get('index',0)+1}**")
+                            if s.get("images"):
+                                for img in (s.get("images") or [])[:2]:
+                                    try:
+                                        st.image(io.BytesIO(img), width=260)
+                                    except Exception:
+                                        pass
+                            if s.get("text"):
+                                st.write(s.get("text"))
+                            if s.get("ocr_text"):
+                                st.caption("OCR:")
+                                st.write(s.get("ocr_text"))
+                            st.markdown("---")
+                    else:
+                        st.info("No slides to preview for this upload.")
+                except Exception as e:
+                    logger.exception("Preview failed: %s", e)
+                    st.error("Preview failed.")
+            # Generate Flashcards (quick)
+            if btn_col3.button("Generate Flashcards", key=f"home_genfc_{_sanitize_key(sel)}"):
+                try:
+                    if selected_upload:
+                        cards = generate_flashcards_from_text(selected_upload.get("full_text",""), n=10)
+                        saved = add_flashcards_to_db_safe(selected_upload, cards)
+                        st.success(f"Saved {saved} flashcards for {selected_upload.get('filename')}")
+                        safe_rerun()
+                    else:
+                        st.warning("No upload selected.")
+                except Exception as e:
+                    logger.exception("Generate flashcards failed: %s", e)
+                    st.error("Flashcard generation failed.")
+        else:
+            st.markdown("<div class='small-muted'>No uploads yet — use the Upload tab to add files and enable these quick actions.</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Footer hint / tips
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><strong>Quick tips</strong><ul>"
+                    "<li>Upload files, process them, then build an index to enable Chat Q&A.</li>"
+                    "<li>Use the 'Generate' buttons to create lessons and practice material automatically.</li>"
+                    "<li>Export flashcards as Anki TSV from Settings.</li>"
+                    "</ul></div>", unsafe_allow_html=True)
+        st.markdown("<div class='small-muted' style='margin-top:8px'>Tip: use the buttons above for fast workflows; if you click a CTA the app will switch to the appropriate tab.</div>", unsafe_allow_html=True)
+
+    except Exception as e:
+        # graceful fallback if something goes wrong
+        logger.exception("render_home failed: %s", e)
+        try:
+            st.markdown(f"### {APP_TITLE} — {APP_SUBTITLE}")
+            st.markdown("Upload PDFs or PPTX and explore features in the tabs above.")
+        except Exception:
+            pass
+
 
 def render_upload_tab():
     st.header("Upload & Process")
