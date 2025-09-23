@@ -578,20 +578,95 @@ def call_openrouter(system_prompt, user_prompt, model="gpt-4o-mini", max_tokens=
     return content.strip()
 
 # ----------------------------
-# Content generation wrappers
+# Content generation wrappers (enhanced, more robust prompts)
 # ----------------------------
+
+# NOTE:
+# - Prompts request both a human-readable Markdown section (for display)
+#   and a strict JSON payload wrapped in triple-backticks (```json ... ```)
+#   so your UI can render the Markdown and your code can reliably parse the JSON.
+# - Each prompt gives precise output schema, length limits, and safety instructions
+#   (e.g., say "CANNOT_ANSWER" if the information isn't present).
+# - Keep temperature low for deterministic outputs when you call the LLM.
+
 PROMPT_LESSON_MULTILEVEL = (
-    "You are an expert teacher. Create a multi-level lesson (Beginner, Intermediate, Advanced) "
-    "based on the provided text. For each level: explanation, worked example, 2-3 tips. Finally add a 3-question quiz."
+    "You are an experienced subject-matter teacher and curriculum designer.\n\n"
+    "TASK: Create a *multi-level lesson* from the provided TEXT. Produce TWO output parts:\n\n"
+    "1) A human-friendly MARKDOWN lesson (suitable for immediate display). Structure it clearly with headings\n"
+    "   and short paragraphs. Include examples and tips so a student can learn from it.\n\n"
+    "2) A strict JSON summary wrapped in triple-backticks labeled as ```json``` (so it can be parsed).\n"
+    "   The JSON object MUST follow this schema exactly:\n"
+    "   {\n"
+    "     \"title\": string,                # short title (<= 80 chars)\n"
+    "     \"levels\": {                     # object with 3 keys: beginner, intermediate, advanced\n"
+    "        \"Beginner\": {\n"
+    "            \"explanation\": string,  # concise explanation (50-300 chars)\n"
+    "            \"worked_example\": string, # one worked example (<= 400 chars)\n"
+    "            \"tips\": [string,...]    # 2-3 short actionable tips\n"
+    "        },\n"
+    "        \"Intermediate\": { ... },\n"
+    "        \"Advanced\": { ... }\n"
+    "     },\n"
+    "     \"short_quiz\": [                 # exactly 3 short quiz items (Q/A pairs)\n"
+    "        {\"question\": string, \"answer\": string}\n"
+    "     ]\n"
+    "   }\n\n"
+    "REQUIREMENTS / GUIDELINES:\n"
+    "- Use only the provided TEXT as your source. Do NOT introduce outside facts.\n"
+    "- If the TEXT does not contain enough information, for any missing piece return the string \"CANNOT_ANSWER\" for that field.\n"
+    "- Keep each explanation concise and focused (see recommended char limits above).\n"
+    "- The Markdown section should mirror the JSON structure with clear H2/H3 headings.\n"
+    "- Language: same language as the TEXT (default English). Tone: clear, teacherly, friendly.\n"
+    "- Avoid lists larger than 5 items. Keep examples minimal and directly relevant.\n\n"
+    "OUTPUT: First the Markdown lesson, then the JSON block. Do NOT output any other stray text."
 )
+
 PROMPT_MCQ_JSON = (
-    "You are an AI that generates MCQs. Reply only with a valid JSON array of objects with keys: "
-    "'question' (string), 'options' (array of 4 strings), 'answer_index' (0-based integer)."
+    "You are an AI that reliably generates high-quality multiple-choice questions (MCQs).\n\n"
+    "TASK: From the provided TEXT, create the requested number of MCQs. Reply ONLY with a valid JSON array\n"
+    "wrapped in triple-backticks labeled ```json``` so it can be parsed. The array should contain objects with the\n"
+    "following keys (strict):\n\n"
+    "  {\n"
+    "    \"question\": string,             # concise stem (<= 200 chars)\n"
+    "    \"options\": [string, string, string, string],  # exactly 4 options, unique, each <= 120 chars\n"
+    "    \"answer_index\": integer,       # 0-based index of the correct option\n"
+    "    \"explanation\": string,         # short explanation of why the correct option is right (<= 200 chars)\n"
+    "    \"distractor_rationale\": [string, string, string], # brief note why each incorrect option is plausible (3 items)\n"
+    "    \"source\": string | null        # optional: slide/page reference or 'CANNOT_ANSWER'\n"
+    "  }\n\n"
+    "REQUIREMENTS / GUIDELINES:\n"
+    "- Produce exactly the number of MCQs requested. If you cannot reach that count, return as many as possible and add a top-level\n"
+    "  JSON field `\"note\":\"GENERATED_N_LESS_THAN_REQUESTED\"` (where N is how many you produced).\n"
+    "- Use only the TEXT as your source. Do NOT invent facts. If the answer cannot be supported by the TEXT, mark the question's\n"
+    "  `explanation` as \"CANNOT_ANSWER\" and prefer NOT to include that question unless you can create plausible but text-grounded\n"
+    "  items.\n"
+    "- Ensure options are similar length and avoid giving clues in wording (no 'all of the above'/'none of the above').\n"
+    "- Try to vary difficulty: label at least one question as 'easy', one 'medium', and one 'hard' in the explanation if multiple are\n"
+    "  requested.\n"
+    "- Do not include any additional fields outside the schema. The response MUST be valid JSON.\n\n"
+    "OUTPUT: Only the JSON array in a ```json``` block."
 )
+
 PROMPT_FLASHCARDS_JSON = (
-    "You are an AI that creates flashcards. Reply only with a valid JSON array of objects with keys: "
-    "'question' and 'answer'."
+    "You are an AI that extracts clear, concise flashcards from the provided TEXT.\n\n"
+    "TASK: Return a JSON array (wrapped in ```json```) of flashcard objects with this exact schema:\n\n"
+    "  [\n"
+    "    {\n"
+    "      \"question\": string,   # short, focused prompt (<= 160 chars)\n"
+    "      \"answer\": string,     # concise correct answer (<= 300 chars)\n"
+    "      \"source\": string|null,# optional slide/page index or 'CANNOT_ANSWER'\n"
+    "      \"tags\": [string,...]  # optional short tags (e.g., ['formula','definition'])\n"
+    "    }\n"
+    "  ]\n\n"
+    "REQUIREMENTS / GUIDELINES:\n"
+    "- Prefer atomic Q/A pairs (one fact or concept per card).\n"
+    "- Avoid verbatim copying of long paragraphs; summarize when possible.\n"
+    "- If the TEXT lacks enough info, produce as many valid flashcards as possible and stop.\n"
+    "- No more than 50 flashcards at once unless explicitly requested.\n"
+    "- Language should match the input TEXT.\n\n"
+    "OUTPUT: Only the JSON array wrapped in ```json```; do not include extra commentary."
 )
+
 
 def generate_multilevel_lesson(context: str):
     prompt = f"{PROMPT_LESSON_MULTILEVEL}\n\nTEXT:\n{context}"
