@@ -1590,7 +1590,7 @@ def render_upload_tab():
                             cols2 = st.columns(len(imgs_to_show))
                             for c_idx, img_bytes in enumerate(imgs_to_show):
                                 try:
-                                    cols2[c_idx].image(io.BytesIO(img_bytes), width=220, use_column_width=False)
+                                    cols2[c_idx].image(io.BytesIO(img_bytes), width=220, use_container_width=False)
                                 except Exception:
                                     try:
                                         cols2[c_idx].write("Image preview not available")
