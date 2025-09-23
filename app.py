@@ -83,7 +83,8 @@ OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
 TOP_K = int(os.getenv("TOP_K", "5"))
 DB_PATH = os.getenv("SLIDETUTOR_DB", "slidetutor.sqlite3")
-
+APP_TITLE = "SlideTutor AI"
+APP_SUBTITLE = "Beautiful • Simple • Smart — Learn from slides quickly."
 
 # ----------------------------
 # Utility helpers
